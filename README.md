@@ -17,10 +17,12 @@ The planned environment includes:
 ## Running the scaffold on macOS
 
 Requires Apple's command-line developer tools (`xcode-select --install`) or
-Xcode, and a Mac with Metal support. No package manager or network access is
-needed to build: the Sokol headers are vendored.
+Xcode, and an Apple Silicon Mac with Metal support. Install the pinned shader
+compiler once with `make setup-tools` (requires network). Subsequent builds work
+offline; the Sokol headers are vendored.
 
 ```sh
+make setup-tools
 make
 make run
 ```
@@ -32,12 +34,27 @@ session. `make clean` removes build output.
 
 - `src/main.c`: application lifecycle, cube geometry, rendering, and input.
 - `src/sokol.m`: Sokol implementation compiled as Objective-C for macOS/Metal.
-- `src/cube_shader.h`: native Metal shader source for the initial Mac target.
+- `shaders/cube.glsl`: portable annotated GLSL, compiled by `sokol-shdc`.
+- `build/generated/cube.glsl.h`: generated shader sources, uniform types, and
+  binding declarations; do not edit or commit.
+- `tools/setup-shdc.sh`: explicit compiler download pinned by commit and SHA-256.
 - `vendor/sokol/`: Sokol headers and upstream license, pinned to commit
   `c0db757ea10cbe40aa8398aa378b2b5aae0278b2` (also recorded in `REVISION`).
 
-This scaffold targets macOS with Metal. Adding other graphics backends will
-require corresponding shaders and platform build configuration; `sokol-shdc`
-is a candidate for generating portable shaders and their binding declarations.
-Sokol upgrades should replace the headers together at an explicit revision and
-include a build and runtime check for API changes.
+The application build currently targets macOS with Metal. Shader generation emits
+Metal (macOS, iOS, simulator), HLSL5, GLSL430, GLSL300ES, and WGSL from the same
+source. Other platforms still need application build configuration and runtime
+verification. GLSL300ES supports this cube's graphics shaders, not compute.
+
+`make` automatically regenerates the shader header when its source changes;
+`make shaders` generates it without building the app. Shader code uses depth
+[0, 1] and `@glsl_options fixup_clipspace` for OpenGL's [-1, 1] convention.
+The app consumes generated attribute/binding constants and uniform structs.
+
+The shader compiler comes from `floooh/sokol-tools-bin` at revision
+`11d0cf678105d614d675e6d9bd2aaf3eeff12f8c`. The bootstrap currently installs the
+Apple Silicon macOS binary under ignored `tools/bin/`; `make clean` preserves it.
+See [tools/README.md](tools/README.md) for the upgrade workflow.
+
+Sokol and shader compiler upgrades should be explicit and checked together:
+regenerate shaders, build, and run the app to catch API or binding changes.
