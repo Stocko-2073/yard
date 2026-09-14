@@ -14,7 +14,7 @@ all: build/yard
 build:
 	mkdir -p build
 
-build/main.o: src/main.c src/astronomy.h $(HEADERS) $(SHADER_HEADER) | build
+build/main.o: src/main.c src/astronomy.h src/skyglow.h $(HEADERS) $(SHADER_HEADER) | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 build/sokol.o: src/sokol.m $(HEADERS) | build
@@ -23,7 +23,10 @@ build/sokol.o: src/sokol.m $(HEADERS) | build
 build/astronomy.o: src/astronomy.c src/astronomy.h | build
 	$(CC) $(CFLAGS) -c $< -o $@
 
-build/yard: build/main.o build/sokol.o build/astronomy.o
+build/skyglow.o: src/skyglow.c src/skyglow.h src/astronomy.h | build
+	$(CC) $(CFLAGS) -c $< -o $@
+
+build/yard: build/main.o build/sokol.o build/astronomy.o build/skyglow.o
 	$(CC) $^ $(FRAMEWORKS) -o $@
 
 run: build/yard
@@ -35,8 +38,13 @@ smoke-test: build/yard
 build/astronomy-test: tests/astronomy_test.c src/astronomy.c src/astronomy.h | build
 	$(CC) $(CFLAGS) -Isrc tests/astronomy_test.c src/astronomy.c -o $@
 
-test: build/astronomy-test
+build/skyglow-test: tests/skyglow_test.c src/skyglow.c src/skyglow.h src/astronomy.h | build
+	$(CC) $(CFLAGS) -Isrc tests/skyglow_test.c src/skyglow.c -o $@
+
+test: build/astronomy-test build/skyglow-test
 	./build/astronomy-test
+	./build/skyglow-test
+	PYTHONDONTWRITEBYTECODE=1 python3 tests/skyglow_import_test.py
 
 clean:
 	rm -rf build

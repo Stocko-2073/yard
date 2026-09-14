@@ -50,9 +50,9 @@ processing: lens distortion, exposure, rolling shutter, Bayer sampling, noise,
 and JPEG/RGB565 output are not simulated. The camera target is single-sample
 RGBA8, with no MSAA. Sun and moon retain their physical angular sizes.
 
-The location is **Thomaston, Georgia, USA**: 32.8908277° N, 84.3271342° W
+The default location is **Thomaston, Georgia, USA**: 32.8908277° N, 84.3271342° W
 ([US Census city coordinates](https://tigerweb.geo.census.gov/tigerwebmain/Files/acs25/tigerweb_acs25_incplace_2025_bas25_ga.html)).
-The simulation starts at the current date/time. The title shows Thomaston local
+The simulation starts at the current date/time. The title shows America/New_York calendar
 time, EST/EDT, and the moon's illuminated percentage and waxing/waning state.
 The internal clock advances in UTC; local display and calendar input use the
 system's `America/New_York` timezone database, including daylight saving.
@@ -95,6 +95,32 @@ a published position example, and calendar/DST boundaries, without a GUI.
 moon dates on Metal, then exits; it requires a graphical macOS session and checks
 rendering execution, not visual correctness. `make clean` removes build output.
 
+## Location-dependent night lighting
+
+Night ambient uses David Lorenz's [2025 Light Pollution Atlas](https://djlorenz.github.io/astronomy/lp/).
+The bundled sample at the default coordinates has artificial zenith brightness
+**5.44× the natural sky** (6.44× total). Sky, ground, and cube share this light;
+it fades out through astronomical twilight. The app remains offline.
+
+To use another location, download a site profile once with Python 3, then load it:
+
+```sh
+python3 tools/fetch-skyglow.py --latitude 33.749 --longitude -84.388 --output /tmp/atlanta-site.txt
+./build/yard --site /tmp/atlanta-site.txt --date 2026-01-21 --time 0
+```
+
+`--site` sets latitude, longitude, and skyglow together, including the location
+used by the sun and moon. The title displays coordinates. Calendar input/display
+still uses **America/New_York**, including for sites in other time zones.
+The atlas covers 65° S through just below 75° N at about 1 km resolution;
+profiles use the nearest grid cell. There is no network lookup during rendering.
+
+Atlas values describe modeled clear-sky brightness at zenith, not Bortle class
+or direct lamp illumination. Relative luminance is data-driven; absolute exposure,
+light color, and the uniform-hemisphere ambient approximation remain uncalibrated.
+Moonlight on surfaces, directional city light domes, clouds, and changes since the
+atlas year are not modeled. See [data provenance and reproduction](data/README.md).
+
 ## Sky model
 
 Sun and moon positions use a small, offline orbital model with lunar perturbations
@@ -125,6 +151,8 @@ is a possible optimization as the yard grows.
 
 - `src/main.c`: application lifecycle, cube geometry, rendering, and input.
 - `src/astronomy.c`: sun/moon ephemeris and local calendar conversion.
+- `src/skyglow.c`: offline site profiles and location-dependent night lighting.
+- `tools/fetch-skyglow.py`: explicit numeric atlas download and site sampling.
 - `tests/astronomy_test.c`: astronomy reference and calendar regression checks.
 - `src/sokol.m`: Sokol implementation compiled as Objective-C for macOS/Metal.
 - `shaders/cube.glsl`: portable annotated GLSL, compiled by `sokol-shdc`.

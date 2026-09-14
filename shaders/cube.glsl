@@ -36,7 +36,7 @@ vec3 sun_transmittance(vec3 p, vec3 sun) {
     }
     return extinction(depth);
 }
-vec3 atmosphere(vec3 ray, vec3 sun) {
+vec3 atmosphere(vec3 ray, vec3 sun, vec3 night) {
     vec3 origin = vec3(0, EARTH + 0.0025, 0);
     // The ground pass hides downward rays; clamp the distant haze to the horizon.
     ray = normalize(vec3(ray.x, max(ray.y, 0.001), ray.z));
@@ -61,7 +61,7 @@ vec3 atmosphere(vec3 ray, vec3 sun) {
     float edge = max(fwidth(distance_to_sun), 0.0001);
     float disk = 1.0 - smoothstep(0.00465-edge, 0.00465+edge, distance_to_sun);
     sky += 40.0 * disk * extinction(depth) * smoothstep(-0.009, 0.0, sun.y);
-    return sky + vec3(0.0005, 0.0008, 0.0016); // Dim night visibility.
+    return sky + night;
 }
 vec3 display_color(vec3 linear_color) {
     // Fixed exposure, ACES fitted tone curve, then linear to sRGB.
@@ -70,10 +70,11 @@ vec3 display_color(vec3 linear_color) {
     return mix(12.92*mapped, 1.055*pow(mapped, vec3(1.0/2.4))-0.055,
                step(vec3(0.0031308), mapped));
 }
-vec3 surface_light(vec3 albedo, vec3 normal, vec3 sun, vec3 sunlight, float visibility) {
+vec3 surface_light(vec3 albedo, vec3 normal, vec3 sun, vec3 sunlight, float visibility, vec3 night) {
     float day = smoothstep(-0.12, 0.18, sun.y);
     // Hemispherical ambient approximation; direct irradiance uses atmospheric extinction.
-    vec3 ambient = mix(vec3(0.001, 0.0015, 0.003), vec3(0.10, 0.17, 0.28), day);
+    // Uniform night hemisphere: irradiance = PI * radiance, in render units.
+    vec3 ambient = vec3(0.10, 0.17, 0.28)*day + PI*night;
     ambient *= mix(0.3, 1.0, normal.y*0.5+0.5);
     return albedo * (ambient + sunlight * max(dot(normal, sun), 0.0) * visibility);
 }
@@ -107,6 +108,7 @@ void main() {
 layout(binding=1) uniform light_params {
     vec4 sun_direction;
     vec4 sun_color;
+    vec4 night_radiance;
 };
 @include_block lighting
 in vec3 face_color;
@@ -119,7 +121,7 @@ void main() {
     if (dot(n, world_position-vec3(0,1,0)) < 0.0) n = -n;
     vec3 albedo = pow(face_color, vec3(2.2));
     frag_color = vec4(display_color(surface_light(albedo, n, sun_direction.xyz,
-                                                sun_color.xyz, 1.0)), 1);
+                                                sun_color.xyz, 1.0, night_radiance.xyz)), 1);
 }
 @end
 
@@ -138,6 +140,7 @@ layout(binding=2) uniform sky_params {
     vec4 sky_view;
     vec4 sky_sun;
     vec4 sky_sun_color;
+    vec4 sky_night_radiance;
     vec4 sky_lens;
     vec4 sky_camera_position;
     vec4 sky_moon; // direction and angular radius
@@ -200,7 +203,7 @@ float cube_shadow(vec3 p, vec3 sun) {
 void main() {
     vec3 ray = normalize(camera_basis(sky_view.xy) *
                         vec3(screen_position.x*sky_view.z, screen_position.y, sky_lens.x));
-    vec3 sky = atmosphere(ray, sky_sun.xyz);
+    vec3 sky = atmosphere(ray, sky_sun.xyz, sky_night_radiance.xyz);
     if (ray.y > 0.0) sky += lunar_disk(ray);
     vec3 result = sky;
     if (ray.y < -0.0001) {
@@ -214,7 +217,7 @@ void main() {
         grid *= 1.0-smoothstep(20.0, 60.0, distance_to_ground);
         vec3 ground = surface_light(vec3(0.16,0.20,0.10)*(1.0-0.15*grid),
                                    vec3(0,1,0), sky_sun.xyz, sky_sun_color.xyz,
-                                   cube_shadow(p, sky_sun.xyz));
+                                   cube_shadow(p, sky_sun.xyz), sky_night_radiance.xyz);
         result = mix(ground, sky, 1.0-exp(-distance_to_ground*0.0015));
     }
     frag_color = vec4(display_color(result), 1);

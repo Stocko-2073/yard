@@ -11,6 +11,7 @@
 #include "sokol_log.h"
 #include "cube.glsl.h"
 #include "astronomy.h"
+#include "skyglow.h"
 
 enum { CAMERA_WIDTH = 800, CAMERA_HEIGHT = 600 };
 static const double CAMERA_INTERVAL = 1.0 / 30.0;
@@ -28,6 +29,7 @@ static struct {
     double utc;
     bool track_moon, zoom;
     yard_ephemeris ephemeris;
+    yard_site site;
     float yaw, pitch;
     float position[4];
     bool keys[SAPP_MAX_KEYCODES];
@@ -173,7 +175,7 @@ static void frame(void) {
         state.track_moon = true;
         state.zoom = true;
     }
-    yard_astronomy(state.utc, YARD_LATITUDE, YARD_LONGITUDE, &state.ephemeris);
+    yard_astronomy(state.utc, state.site.latitude, state.site.longitude, &state.ephemeris);
     if (state.track_moon) {
         state.yaw = (float)atan2(state.ephemeris.moon[0], -state.ephemeris.moon[2]);
         state.pitch = (float)asin(state.ephemeris.moon[1]);
@@ -186,7 +188,7 @@ static void frame(void) {
         yard_local_calendar(state.utc, &local);
         strftime(date, sizeof(date), "%Y-%m-%d %H:%M %Z", &local);
         snprintf(title, sizeof(title), "Yard | 800x600 | Lat %.5f, Lon %.5f | %s | Moon %.0f%% %s%s",
-                 YARD_LATITUDE, YARD_LONGITUDE, date, state.ephemeris.illuminated*100, state.ephemeris.waxing ? "waxing" : "waning",
+                 state.site.latitude, state.site.longitude, date, state.ephemeris.illuminated*100, state.ephemeris.waxing ? "waxing" : "waning",
                  state.ephemeris.moon[1] < 0 ? " (below horizon)" : "");
         sapp_set_window_title(title);
         state.title_minute = minute;
@@ -201,8 +203,10 @@ static void frame(void) {
         };
         light_params_t light = {0};
         sunlight(state.ephemeris.sun, light.sun_color, 3.0);
+        yard_night_light(&state.site, state.ephemeris.sun[1], light.night_radiance);
         for (int i=0; i<3; ++i) light.sun_direction[i] = (float)state.ephemeris.sun[i];
         sky_params_t sky = {0};
+        memcpy(sky.sky_night_radiance, light.night_radiance, sizeof(sky.sky_night_radiance));
         memcpy(sky.sky_camera_position, uniforms.camera_position, sizeof(sky.sky_camera_position));
         memcpy(sky.sky_lens, uniforms.lens, sizeof(sky.sky_lens));
         memcpy(sky.sky_view, uniforms.view, sizeof(sky.sky_view));
@@ -317,6 +321,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
         perror("TZ"); exit(EXIT_FAILURE);
     }
     tzset();
+    state.site = yard_default_site;
     state.vertical_fov = 60.0f; // XIAO Sense OV2640 stock lens FOV is not yet calibrated.
     state.utc = (double)time(NULL);
     state.position[1] = 2.5f;
@@ -330,6 +335,13 @@ sapp_desc sokol_main(int argc, char *argv[]) {
         if (strcmp(argv[i], "--smoke-test") == 0) state.smoke_test = true;
         else if (strcmp(argv[i], "--moon") == 0) state.track_moon = true;
         else if (strcmp(argv[i], "--zoom") == 0) state.zoom = true;
+        else if (strcmp(argv[i], "--site") == 0 && i+1 < argc) {
+            const char *path = argv[++i];
+            if (!yard_site_load(path, &state.site)) {
+                fprintf(stderr, "Cannot load skyglow site: %s\n", path);
+                goto usage;
+            }
+        }
         else if (strcmp(argv[i], "--vfov") == 0 && i+1 < argc) {
             const char *argument = argv[++i];
             char *end = NULL;
@@ -355,6 +367,8 @@ sapp_desc sokol_main(int argc, char *argv[]) {
         if (!yard_local_datetime(requested_date ? requested_date : today, hour, &state.utc)) goto usage;
         state.paused = true;
     }
+    printf("Yard: skyglow atlas %d, lat %.7f lon %.7f, artificial/natural %.4f\n",
+           state.site.year, state.site.latitude, state.site.longitude, state.site.artificial_ratio);
     return (sapp_desc){
         .init_cb = init, .frame_cb = frame, .cleanup_cb = cleanup, .event_cb = event,
         .width = CAMERA_WIDTH, .height = CAMERA_HEIGHT, .sample_count = 1, .high_dpi = true,
@@ -362,7 +376,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
         .logger.func = slog_func,
     };
 usage:
-    fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--smoke-test]\n"
+    fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--smoke-test] [--site profile]\n"
                     "Dates: 1900-2100; hours: [0,24), America/New_York. Invalid dates and DST gaps are rejected.\n", argv[0]);
     exit(EXIT_FAILURE);
 }
