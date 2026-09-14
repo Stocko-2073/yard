@@ -1,16 +1,19 @@
 # Hardware camera reference collection
 
-Status: collection protocol only; no hardware reference images have been collected
-or validated in this repository. The first camera TODO remains open until the
-reference set below exists. This procedure targets the original XIAO ESP32-S3
+Status: USB firmware and collection tooling have been verified against a connected
+OV2640, including a 360-frame indoor static sweep. See the
+[bring-up record](../data/camera-reference/INDOOR_BRINGUP.md). The first camera TODO
+remains open until the outdoor and controlled-motion reference set below exists. This procedure targets the original XIAO ESP32-S3
 Sense with OV2640, using its installed lens and 800×600 SVGA output.
 
 ## Before collection
 
 Identify the board, sensor, and lens physically. Save the exact capture firmware
 source revision, local modifications, build configuration, and camera-driver
-revision with the session. Use firmware that saves original camera buffers and
-logs settings and frame timestamps; Yard itself does not capture hardware images.
+revision with the session. The [USB capture utility](../tools/camera-reference/README.md)
+provides firmware and a collector for bring-up and static sweeps, saving original
+camera buffers, settings, and timestamps. The Yard renderer itself does not capture
+hardware images.
 Record how that firmware is built and run so another session can reproduce it.
 
 Use a fixed mount overlooking a static scene with matte light, middle-gray, and

@@ -25,3 +25,8 @@ Authoring reference: [sokol-shdc documentation](https://github.com/floooh/sokol-
 
 `cleanup_worktrees.py` previews or removes clean worktrees with confirmed merged
 PRs. See [CLEANUP_WORKTREES.md](CLEANUP_WORKTREES.md) for usage and retention rules.
+
+## Hardware camera capture
+
+See [USB camera reference capture](camera-reference/README.md) for the separate
+Arduino firmware and Python collector used for OV2640 bring-up and static sweeps.
