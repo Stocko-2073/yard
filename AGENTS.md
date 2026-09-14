@@ -16,7 +16,16 @@ and visual/sensor representation, with one physics owner per dynamic object.
 
 ## Current scaffold
 
-- C11 application code in `src/main.c`.
+- C11 application code in `src/main.c`; sun/moon ephemeris in `src/astronomy.c`.
+- Sky location: Thomaston GA (32.8908277 N, 84.3271342 W); UTC simulation clock
+  with America/New_York calendar input/display. Keep sun and moon on the same clock.
+- Show location as latitude/longitude in the app; do not display city names.
+- Preserve physical sun/moon sizes; avoid artistic size multipliers.
+- Camera output is fixed 800×600 SVGA at up to 30 fps, displayed with letterboxing.
+  Window resizing/Retina must not change camera resolution or projection. FOV is
+  lens-dependent (`--vfov`); target is the original XIAO ESP32-S3 Sense OV2640.
+  Its stock lens FOV is unverified; 60° vertical remains an uncalibrated placeholder.
+  Z magnifies only the preview, not the camera projection.
 - Sokol implementation in `src/sokol.m`, compiled as Objective-C with ARC.
 - macOS/Metal app target with portable shader source in `shaders/cube.glsl`.
 - `sokol-shdc` generates `build/generated/cube.glsl.h`; never edit it by hand.
@@ -37,8 +46,11 @@ regenerate shaders offline. See `tools/README.md` for compiler pinning.
 - `make setup-tools` installs the pinned shader compiler (network required once).
 - `make shaders` generates the portable shader header.
 - `make` builds the app with Apple's toolchain.
-- `make run` launches the interactive cube; Space pauses and Escape quits.
-- `make smoke-test` renders 120 frames on Metal and exits.
+- `make run` launches the sky and lighting demo; Space pauses the date/time,
+  Left/Right scrub time, brackets step days, WASD move, click captures mouse look, M tracks the moon,
+  Z magnifies the preview, 1–4 select local clock presets, and Escape releases the mouse (or quits when released).
+- `make smoke-test` captures 120 SVGA frames across four lunar phases on Metal and exits.
+- `make test` checks the astronomy and local calendar without a graphical session.
 - `make clean` removes generated output under `build/`.
 
 For rendering or build changes, build without warnings and run the smoke check

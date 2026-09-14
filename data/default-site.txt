@@ -1,0 +1,5 @@
+YARD_SKYGLOW_V1 32.8908277000 -84.3271342000 2025 5.44249805476
+# David Lorenz, Light Pollution Atlas; artificial/natural zenith brightness ratio.
+# Source: https://djlorenz.github.io/astronomy/binary_tiles/2025/binary_tile_20_20.dat.gz
+# Tile SHA-256: 85c2ec3f2faafc5366d7c6608d9a0a43c9866ae9af4c92daaa9f6b5f3cfb6cf9
+# Zero-based cell (west to east, south to north): 80, 346
