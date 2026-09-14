@@ -52,7 +52,37 @@ Keep generated binaries and objects out of version control.
 
 ## Repository workflow
 
-`dev` is the GitHub default branch and the development branch. `main` also exists;
-merge and push when requested. The SSH origin is
-`stocko-git:Stocko-2073/yard.git`, where `stocko-git` is a configured SSH host alias.
-Preserve that alias rather than replacing it with a generic GitHub host URL.
+`dev` is the GitHub default and PR integration branch. Keep the base checkout
+clean: do implementation work on a task branch in a linked worktree under the
+base checkout's `.worktrees/` directory. Create one before editing, normally from
+an up-to-date `dev`. Inspect local commits before updating branches; never reset
+or discard user work to synchronize with a remote.
+
+Find the base checkout with `git worktree list --porcelain`; its first worktree
+is the main checkout. Do not assume the current directory is the base checkout.
+Use explicit working directories for commands throughout a task. Ignore
+`.worktrees/` and keep generated build output in each worktree. New worktrees
+need `make setup-tools` before building unless their compiler is already present.
+
+Proactively commit coherent, verified changes on the task branch and push it.
+Create a PR targeting `dev` once the change is ready for review, without waiting
+for a separate request to commit or open a PR. Use a draft PR if useful work is
+ready to share but validation or implementation remains incomplete. PRs should
+explain the problem, resulting behavior, validation, and material limitations.
+Do not include unrelated changes. Merge PRs or promote `dev` to `main` when
+requested; proactive PR creation does not imply permission to merge.
+
+The project hook in `.codex/hooks.json` checks the base checkout at session start,
+on prompt submission, after tool calls, and when a turn stops. Dirty means staged,
+unstaged, or untracked files reported by `git status`; ignored files and merely
+being ahead of the remote do not trigger it. It warns without blocking or changing
+files, including when invoked from a linked worktree. Preserve unexpected changes
+in the base checkout and continue independent work in the task worktree.
+
+Codex requires project trust and review of new or changed hook definitions before
+running them. Review them with `/hooks` in the CLI; do not bypass hook trust.
+See `.codex/hooks/README.md` for installation and verification details.
+
+The SSH origin is `stocko-git:Stocko-2073/yard.git`, where `stocko-git` is a
+configured SSH host alias. Preserve that alias rather than replacing it with a
+generic GitHub host URL.
