@@ -12,6 +12,8 @@ below are future work. See [camera design and current limits](design/CAMERA.md).
 - [ ] Capture a hardware reference set across daylight, twilight, and night,
       with recorded exposure/gain, firmware revision, pixel format, and clock
       settings. Include static scenes and controlled camera motion.
+      [Collection protocol and metadata template](design/CAMERA_REFERENCE.md) are
+      prepared; actual hardware collection and review remain outstanding.
 - [ ] Verify SVGA line timing and the exposure/frame-period relationship on the
       actual module. Replace inferred profile timings with measured values.
 - [ ] Calibrate render brightness against the reference captures across shutter

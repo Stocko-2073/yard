@@ -83,6 +83,9 @@ Noise, full-well capacity, ADC response, sensor spectral response, white balance
 lens transmission, and the real camera's JPEG/RGB565 pipeline are still absent.
 High gain therefore produces an unrealistically clean image. Absolute night
 performance needs calibration against captures from the actual camera and lens.
+Use the [hardware reference collection protocol](CAMERA_REFERENCE.md) and its
+session metadata template for that first capture set. No hardware reference set
+has been collected or validated in this repository yet.
 
 ## Other camera profiles
 
