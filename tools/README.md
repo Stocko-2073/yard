@@ -20,3 +20,8 @@ WGSL. This verifies translation, not execution on every backend. Future compute
 shaders must use compatible targets (for example GLSL310ES instead of GLSL300ES).
 
 Authoring reference: [sokol-shdc documentation](https://github.com/floooh/sokol-tools/blob/master/docs/sokol-shdc.md).
+
+## Worktree maintenance
+
+`cleanup_worktrees.py` previews or removes clean worktrees with confirmed merged
+PRs. See [CLEANUP_WORKTREES.md](CLEANUP_WORKTREES.md) for usage and retention rules.
