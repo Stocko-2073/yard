@@ -97,6 +97,9 @@ explain the problem, resulting behavior, validation, and material limitations.
 Do not include unrelated changes. Merge PRs or promote `dev` to `main` when
 requested; proactive PR creation does not imply permission to merge.
 
+When continuing with more work in the current session, and if the PR has not yet
+been merged, append to the PR instead of creating an new worktree/PR.
+
 Preserve unexpected changes in the base checkout and continue independent work
 in the task worktree.
 
