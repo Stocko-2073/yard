@@ -12,15 +12,15 @@
 #include "cube.glsl.h"
 #include "astronomy.h"
 #include "skyglow.h"
+#include "camera.h"
 
-enum { CAMERA_WIDTH = 800, CAMERA_HEIGHT = 600 };
-static const double CAMERA_INTERVAL = 1.0 / 30.0;
 
 static struct {
     sg_pipeline preview_pipeline;
     sg_bindings preview_bindings;
     sg_attachments camera_attachments;
     float vertical_fov;
+    yard_camera camera;
     double capture_elapsed;
     unsigned captures;
     sg_pipeline pipeline;
@@ -71,13 +71,13 @@ static void init(void) {
     });
     sg_image camera_color = sg_make_image(&(sg_image_desc){
         .usage.color_attachment = true,
-        .width = CAMERA_WIDTH, .height = CAMERA_HEIGHT,
+        .width = state.camera.profile.width, .height = state.camera.profile.height,
         .pixel_format = SG_PIXELFORMAT_RGBA8, .sample_count = 1,
         .label = "SVGA camera color",
     });
     sg_image camera_depth = sg_make_image(&(sg_image_desc){
         .usage.depth_stencil_attachment = true,
-        .width = CAMERA_WIDTH, .height = CAMERA_HEIGHT,
+        .width = state.camera.profile.width, .height = state.camera.profile.height,
         .pixel_format = SG_PIXELFORMAT_DEPTH, .sample_count = 1,
         .label = "SVGA camera depth",
     });
@@ -183,29 +183,33 @@ static void frame(void) {
     state.capture_elapsed += dt;
     int64_t minute = (int64_t)floor(state.utc / 60);
     if (minute != state.title_minute) {
-        char title[256], date[64];
+        char title[384], date[64];
         struct tm local;
         yard_local_calendar(state.utc, &local);
         strftime(date, sizeof(date), "%Y-%m-%d %H:%M %Z", &local);
-        snprintf(title, sizeof(title), "Yard | 800x600 | Lat %.5f, Lon %.5f | %s | Moon %.0f%% %s%s",
+        snprintf(title, sizeof(title), "Yard | %dx%d | Manual %.2f ms %.1fx (AEC %d, gain %d) | Lat %.5f, Lon %.5f | %s | Moon %.0f%% %s%s",
+                 state.camera.profile.width, state.camera.profile.height, yard_camera_exposure_ms(&state.camera),
+                 yard_camera_gain(&state.camera), state.camera.exposure_lines, state.camera.gain_index,
                  state.site.latitude, state.site.longitude, date, state.ephemeris.illuminated*100, state.ephemeris.waxing ? "waxing" : "waning",
                  state.ephemeris.moon[1] < 0 ? " (below horizon)" : "");
         sapp_set_window_title(title);
         state.title_minute = minute;
     }
     if (sapp_width() <= 0 || sapp_height() <= 0) return;
-    if (state.captures == 0 || state.capture_elapsed >= CAMERA_INTERVAL) {
-        state.capture_elapsed = fmod(state.capture_elapsed, CAMERA_INTERVAL);
+    if (state.captures == 0 || state.capture_elapsed >= (1.0 / state.camera.profile.fps)) {
+        state.capture_elapsed = fmod(state.capture_elapsed, (1.0 / state.camera.profile.fps));
         const vs_params_t uniforms = {
-            .view = {state.yaw, state.pitch, (float)CAMERA_WIDTH / CAMERA_HEIGHT, state.angle},
+            .view = {state.yaw, state.pitch, (float)state.camera.profile.width / state.camera.profile.height, state.angle},
             .lens = {1.0f / tanf(state.vertical_fov * 0.00872664626f), 0, 0, 0},
             .camera_position = {state.position[0], state.position[1], state.position[2], 0},
         };
         light_params_t light = {0};
         sunlight(state.ephemeris.sun, light.sun_color, 3.0);
+        light.camera_exposure[0] = yard_camera_multiplier(&state.camera);
         yard_night_light(&state.site, state.ephemeris.sun[1], light.night_radiance);
         for (int i=0; i<3; ++i) light.sun_direction[i] = (float)state.ephemeris.sun[i];
         sky_params_t sky = {0};
+        sky.sky_camera_exposure[0] = light.camera_exposure[0];
         memcpy(sky.sky_night_radiance, light.night_radiance, sizeof(sky.sky_night_radiance));
         memcpy(sky.sky_camera_position, uniforms.camera_position, sizeof(sky.sky_camera_position));
         memcpy(sky.sky_lens, uniforms.lens, sizeof(sky.sky_lens));
@@ -239,8 +243,8 @@ static void frame(void) {
     }
     // Letterbox the fixed sensor image. Window size never changes its intrinsics.
     int window_width = sapp_width(), window_height = sapp_height();
-    float scale = fminf((float)window_width/CAMERA_WIDTH, (float)window_height/CAMERA_HEIGHT);
-    int width = (int)(CAMERA_WIDTH*scale), height = (int)(CAMERA_HEIGHT*scale);
+    float scale = fminf((float)window_width/state.camera.profile.width, (float)window_height/state.camera.profile.height);
+    int width = (int)(state.camera.profile.width*scale), height = (int)(state.camera.profile.height*scale);
     if (width < 1) width = 1;
     if (height < 1) height = 1;
     sg_begin_pass(&(sg_pass){
@@ -256,7 +260,8 @@ static void frame(void) {
     sg_end_pass();
     sg_commit();
     if (state.captures == 120 && state.smoke_test) {
-        puts("Yard: rendered 120 SVGA 800x600 camera frames on Metal at a maximum of 30 fps (four lunar phases).");
+        printf("Yard: rendered 120 %dx%d camera frames on Metal at a maximum of %.1f fps (four lunar phases).\n",
+               state.camera.profile.width, state.camera.profile.height, state.camera.profile.fps);
         sapp_request_quit();
     }
 }
@@ -281,6 +286,14 @@ static void event(const sapp_event *ev) {
         state.keys[ev->key_code] = ev->type == SAPP_EVENTTYPE_KEY_DOWN;
     }
     if (ev->type != SAPP_EVENTTYPE_KEY_DOWN || ev->key_repeat) return;
+    if (ev->key_code == SAPP_KEYCODE_COMMA || ev->key_code == SAPP_KEYCODE_PERIOD) {
+        yard_camera_step_exposure(&state.camera, ev->key_code == SAPP_KEYCODE_PERIOD ? 1 : -1);
+        state.title_minute = INT64_MIN;
+    }
+    if (ev->key_code == SAPP_KEYCODE_MINUS || ev->key_code == SAPP_KEYCODE_EQUAL) {
+        yard_camera_step_gain(&state.camera, ev->key_code == SAPP_KEYCODE_EQUAL ? 1 : -1);
+        state.title_minute = INT64_MIN;
+    }
     if (ev->key_code == SAPP_KEYCODE_M) state.track_moon = !state.track_moon;
     if (ev->key_code == SAPP_KEYCODE_Z) state.zoom = !state.zoom;
     if (ev->key_code == SAPP_KEYCODE_W || ev->key_code == SAPP_KEYCODE_A ||
@@ -322,6 +335,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     }
     tzset();
     state.site = yard_default_site;
+    yard_camera_init(&state.camera, &yard_ov2640_svga);
     state.vertical_fov = 60.0f; // XIAO Sense OV2640 stock lens FOV is not yet calibrated.
     state.utc = (double)time(NULL);
     state.position[1] = 2.5f;
@@ -331,10 +345,24 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     state.title_minute = INT64_MIN;
     const char *requested_date = NULL;
     double requested_hour = -1;
+    const char *profile_path = NULL;
+    double exposure_ms = -1, gain = -1, exposure_lines = -1, gain_index = -1;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--smoke-test") == 0) state.smoke_test = true;
         else if (strcmp(argv[i], "--moon") == 0) state.track_moon = true;
         else if (strcmp(argv[i], "--zoom") == 0) state.zoom = true;
+        else if (strcmp(argv[i], "--camera-profile") == 0 && i+1 < argc) profile_path = argv[++i];
+        else if ((strcmp(argv[i], "--exposure-ms") == 0 || strcmp(argv[i], "--gain") == 0 ||
+                  strcmp(argv[i], "--aec-value") == 0 || strcmp(argv[i], "--agc-gain") == 0) && i+1 < argc) {
+            const char *option = argv[i], *argument = argv[++i];
+            char *end;
+            double value = strtod(argument, &end);
+            if (!isfinite(value) || value < 0 || end == argument || *end != '\0') goto usage;
+            if (strcmp(option, "--exposure-ms") == 0) exposure_ms = value;
+            else if (strcmp(option, "--gain") == 0) gain = value;
+            else if (strcmp(option, "--aec-value") == 0) exposure_lines = value;
+            else gain_index = value;
+        }
         else if (strcmp(argv[i], "--site") == 0 && i+1 < argc) {
             const char *path = argv[++i];
             if (!yard_site_load(path, &state.site)) {
@@ -358,6 +386,21 @@ sapp_desc sokol_main(int argc, char *argv[]) {
                 requested_hour < 0 || requested_hour >= 24) goto usage;
         } else goto usage;
     }
+    if (profile_path) {
+        yard_camera_profile profile;
+        if (!yard_camera_profile_load(profile_path, &profile)) {
+            fprintf(stderr, "Cannot load camera profile: %s\n", profile_path);
+            goto usage;
+        }
+        yard_camera_init(&state.camera, &profile);
+    }
+    if ((exposure_ms >= 0 && exposure_lines >= 0) || (gain >= 0 && gain_index >= 0)) goto usage;
+    if (exposure_ms >= 0 && !yard_camera_set_exposure_ms(&state.camera, exposure_ms)) goto usage;
+    if (gain >= 0 && !yard_camera_set_gain(&state.camera, gain)) goto usage;
+    if (exposure_lines >= 0 && (exposure_lines > state.camera.profile.max_exposure_lines ||
+        floor(exposure_lines) != exposure_lines || !yard_camera_set_lines(&state.camera, (int)exposure_lines))) goto usage;
+    if (gain_index >= 0 && (gain_index >= state.camera.profile.gain_count || floor(gain_index) != gain_index ||
+        !yard_camera_set_gain_index(&state.camera, (int)gain_index))) goto usage;
     if (requested_date || requested_hour >= 0) {
         struct tm local;
         char today[16];
@@ -367,16 +410,23 @@ sapp_desc sokol_main(int argc, char *argv[]) {
         if (!yard_local_datetime(requested_date ? requested_date : today, hour, &state.utc)) goto usage;
         state.paused = true;
     }
+    printf("Yard: camera %s, %dx%d %.1f fps, manual %.4f ms %.2fx (AEC %d, gain %d), render multiplier %.3f\n",
+           state.camera.profile.name, state.camera.profile.width, state.camera.profile.height, state.camera.profile.fps,
+           yard_camera_exposure_ms(&state.camera), yard_camera_gain(&state.camera), state.camera.exposure_lines,
+           state.camera.gain_index, yard_camera_multiplier(&state.camera));
     printf("Yard: skyglow atlas %d, lat %.7f lon %.7f, artificial/natural %.4f\n",
            state.site.year, state.site.latitude, state.site.longitude, state.site.artificial_ratio);
     return (sapp_desc){
         .init_cb = init, .frame_cb = frame, .cleanup_cb = cleanup, .event_cb = event,
-        .width = CAMERA_WIDTH, .height = CAMERA_HEIGHT, .sample_count = 1, .high_dpi = true,
+        .width = state.camera.profile.width, .height = state.camera.profile.height, .sample_count = 1, .high_dpi = true,
         .window_title = "Yard | Click: mouse look | WASD: move | Esc: release/quit",
         .logger.func = slog_func,
     };
 usage:
     fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--smoke-test] [--site profile]\n"
+                    "Camera: [--camera-profile FILE] [--exposure-ms MS | --aec-value LINES] [--gain MULTIPLIER | --agc-gain INDEX]\n"
+                    "OV2640 default: manual shutter 0-33.333333 ms (AEC 0-1200, frame-capped), gain 1-31x (index 0-30).\n"
+                    "Keys: comma/period = shutter -/+ 1/3 stop; minus/equal = gain -/+ one step.\n"
                     "Dates: 1900-2100; hours: [0,24), America/New_York. Invalid dates and DST gaps are rejected.\n", argv[0]);
     exit(EXIT_FAILURE);
 }

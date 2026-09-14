@@ -63,9 +63,9 @@ vec3 atmosphere(vec3 ray, vec3 sun, vec3 night) {
     sky += 40.0 * disk * extinction(depth) * smoothstep(-0.009, 0.0, sun.y);
     return sky + night;
 }
-vec3 display_color(vec3 linear_color) {
-    // Fixed exposure, ACES fitted tone curve, then linear to sRGB.
-    vec3 x = max(linear_color, vec3(0));
+vec3 display_color(vec3 linear_color, float exposure) {
+    // Integrate shutter and gain in linear space before tone mapping and 8-bit output.
+    vec3 x = max(linear_color * exposure, vec3(0));
     vec3 mapped = clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0);
     return mix(12.92*mapped, 1.055*pow(mapped, vec3(1.0/2.4))-0.055,
                step(vec3(0.0031308), mapped));
@@ -109,6 +109,7 @@ layout(binding=1) uniform light_params {
     vec4 sun_direction;
     vec4 sun_color;
     vec4 night_radiance;
+    vec4 camera_exposure; // shutter * gain / reference exposure
 };
 @include_block lighting
 in vec3 face_color;
@@ -121,7 +122,7 @@ void main() {
     if (dot(n, world_position-vec3(0,1,0)) < 0.0) n = -n;
     vec3 albedo = pow(face_color, vec3(2.2));
     frag_color = vec4(display_color(surface_light(albedo, n, sun_direction.xyz,
-                                                sun_color.xyz, 1.0, night_radiance.xyz)), 1);
+                                                sun_color.xyz, 1.0, night_radiance.xyz), camera_exposure.x), 1);
 }
 @end
 
@@ -141,6 +142,7 @@ layout(binding=2) uniform sky_params {
     vec4 sky_sun;
     vec4 sky_sun_color;
     vec4 sky_night_radiance;
+    vec4 sky_camera_exposure;
     vec4 sky_lens;
     vec4 sky_camera_position;
     vec4 sky_moon; // direction and angular radius
@@ -220,7 +222,7 @@ void main() {
                                    cube_shadow(p, sky_sun.xyz), sky_night_radiance.xyz);
         result = mix(ground, sky, 1.0-exp(-distance_to_ground*0.0015));
     }
-    frag_color = vec4(display_color(result), 1);
+    frag_color = vec4(display_color(result, sky_camera_exposure.x), 1);
 }
 @end
 
