@@ -52,7 +52,37 @@ Keep generated binaries and objects out of version control.
 
 ## Repository workflow
 
-`dev` is the GitHub default branch and the development branch. `main` also exists;
-merge and push when requested. The SSH origin is
-`stocko-git:Stocko-2073/yard.git`, where `stocko-git` is a configured SSH host alias.
-Preserve that alias rather than replacing it with a generic GitHub host URL.
+`dev` is the GitHub default and PR integration branch. Keep the base checkout
+clean: do implementation work on a task branch in a linked worktree under the
+base checkout's `.worktrees/` directory. Before editing, fetch `origin` and create
+the task branch and worktree from `origin/dev`:
+
+```sh
+git fetch origin
+git worktree add .worktrees/<task> -b <task-branch> origin/dev
+```
+
+Run the worktree creation command from the base checkout. Use `origin/dev` as
+the starting point, not the local `dev` branch. Never reset or discard user work
+to synchronize with a remote.
+
+Find the base checkout with `git worktree list --porcelain`; its first worktree
+is the main checkout. Do not assume the current directory is the base checkout.
+Use explicit working directories for commands throughout a task. Ignore
+`.worktrees/` and keep generated build output in each worktree. New worktrees
+need `make setup-tools` before building unless their compiler is already present.
+
+Proactively commit coherent, verified changes on the task branch and push it.
+Create a PR targeting `dev` once the change is ready for review, without waiting
+for a separate request to commit or open a PR. Use a draft PR if useful work is
+ready to share but validation or implementation remains incomplete. PRs should
+explain the problem, resulting behavior, validation, and material limitations.
+Do not include unrelated changes. Merge PRs or promote `dev` to `main` when
+requested; proactive PR creation does not imply permission to merge.
+
+Preserve unexpected changes in the base checkout and continue independent work
+in the task worktree.
+
+The SSH origin is `stocko-git:Stocko-2073/yard.git`, where `stocko-git` is a
+configured SSH host alias. Preserve that alias rather than replacing it with a
+generic GitHub host URL.
