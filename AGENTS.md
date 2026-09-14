@@ -21,11 +21,16 @@ and visual/sensor representation, with one physics owner per dynamic object.
   with America/New_York calendar input/display. Keep sun and moon on the same clock.
 - Show location as latitude/longitude in the app; do not display city names.
 - Preserve physical sun/moon sizes; avoid artistic size multipliers.
-- Camera output is fixed 800×600 SVGA at up to 30 fps, displayed with letterboxing.
+- The medium-term camera target is the original XIAO ESP32-S3 Sense OV2640.
+  Its default profile outputs fixed 800×600 SVGA at up to 30 fps with letterboxing.
+  Keep camera timing, exposure limits, and gain steps configurable through profiles
+  for future cameras; see `design/CAMERA.md` for controls and calibration limits.
   Window resizing/Retina must not change camera resolution or projection. FOV is
-  lens-dependent (`--vfov`); target is the original XIAO ESP32-S3 Sense OV2640.
+  lens-dependent (`--vfov`).
   Its stock lens FOV is unverified; 60° vertical remains an uncalibrated placeholder.
   Z magnifies only the preview, not the camera projection.
+  Exposure/gain are manual: comma/period adjust shutter, minus/equals adjust gain.
+  OV2640 line timing is inferred from nominal SVGA/30 fps, not measured on hardware.
 - Sokol implementation in `src/sokol.m`, compiled as Objective-C with ARC.
 - macOS/Metal app target with portable shader source in `shaders/cube.glsl`.
 - `sokol-shdc` generates `build/generated/cube.glsl.h`; never edit it by hand.

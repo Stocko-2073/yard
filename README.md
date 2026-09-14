@@ -29,14 +29,15 @@ make run
 
 The app opens a resizable Metal window with an atmospheric sky, date-driven sun
 and moon, a lit cube, and a ground plane with a metre grid and a directional
-sun shadow. The camera produces a fixed **800×600, 4:3** image at up to **30 fps**,
+sun shadow. The default camera produces a fixed **800×600, 4:3** image at up to **30 fps**,
 matching the OV2640's SVGA output dimensions and maximum nominal frame rate
 ([sensor datasheet](https://files.waveshare.com/wiki/common/OV2640DS_en.pdf)).
 The window starts at 800×600 logical pixels. Resizing letterboxes the same camera
 image; Retina displays magnify it without increasing sensor resolution. Preview
 scaling uses nearest-neighbor sampling so individual sensor pixels remain visible.
 
-The target module is the original **XIAO ESP32-S3 Sense with OV2640**.
+The medium-term target module is the original **XIAO ESP32-S3 Sense with OV2640**.
+Its built-in camera profile defaults to SVGA; profiles keep other cameras configurable.
 [Seeed's documentation](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/#for-seeed-studio-xiao-esp32-s3-sense-camera)
 provides the OV2640 sensor datasheet, but a stock-lens horizontal/vertical FOV
 could not be verified there. The projection therefore retains an uncalibrated **60° vertical FOV** (75.18° horizontal at
@@ -45,9 +46,9 @@ For a centered, flat target filling the image vertically, measure its height H
 and perpendicular distance D: vertical FOV = 2 atan(H / (2D)). A camera
 calibration will also account for lens distortion.
 
-This models resolution, aspect ratio and capture cadence, not the OV2640's image
-processing: lens distortion, exposure, rolling shutter, Bayer sampling, noise,
-and JPEG/RGB565 output are not simulated. The camera target is single-sample
+This models resolution, aspect ratio, capture cadence, and manual shutter/gain
+response. Lens distortion, automatic exposure/gain, temporal shutter integration,
+rolling shutter, Bayer sampling, noise, and JPEG/RGB565 output are not simulated. The camera target is single-sample
 RGBA8, with no MSAA. Sun and moon retain their physical angular sizes.
 
 The default location is **Thomaston, Georgia, USA**: 32.8908277° N, 84.3271342° W
@@ -95,6 +96,29 @@ a published position example, and calendar/DST boundaries, without a GUI.
 moon dates on Metal, then exits; it requires a graphical macOS session and checks
 rendering execution, not visual correctness. `make clean` removes build output.
 
+## Camera exposure
+
+Manual controls follow the OV2640's line-based shutter and Espressif gain steps.
+Use **comma/period** to decrease/increase shutter, and **minus/equals** to change
+gain. The title shows effective milliseconds and gain multiplier. These controls
+work while time is paused and affect the captured image before 8-bit conversion.
+
+```sh
+# Manual night starting point: about 33.3 ms at 16x gain
+./build/yard --date 2026-01-21 --time 0 --aec-value 672 --agc-gain 15
+# Physical-unit equivalent
+./build/yard --date 2026-01-21 --time 0 --exposure-ms 33.333333 --gain 16
+```
+
+The default is about 10 ms at 1×. There is **no automatic exposure** yet; adjust
+settings when moving between day and night. At nominal 30 fps shutter is capped
+at one frame (33.3 ms). Hardware line timing and absolute sensitivity remain
+uncalibrated; high gain currently adds no noise or motion blur.
+
+`--camera-profile FILE` configures dimensions, frame rate, shutter timing/limits,
+and gain steps for other cameras. The default stays OV2640 SVGA. See
+[camera controls, sources, and profile format](design/CAMERA.md).
+
 ## Location-dependent night lighting
 
 Night ambient uses David Lorenz's [2025 Light Pollution Atlas](https://djlorenz.github.io/astronomy/lp/).
@@ -116,7 +140,7 @@ The atlas covers 65° S through just below 75° N at about 1 km resolution;
 profiles use the nearest grid cell. There is no network lookup during rendering.
 
 Atlas values describe modeled clear-sky brightness at zenith, not Bortle class
-or direct lamp illumination. Relative luminance is data-driven; absolute exposure,
+or direct lamp illumination. Relative luminance is data-driven; absolute sensitivity,
 light color, and the uniform-hemisphere ambient approximation remain uncalibrated.
 Moonlight on surfaces, directional city light domes, clouds, and changes since the
 atlas year are not modeled. See [data provenance and reproduction](data/README.md).
@@ -141,7 +165,7 @@ The sky integrates single Rayleigh and Mie scattering through a spherical,
 exponentially thinning atmosphere, following the approach described in
 [NVIDIA GPU Gems 2, chapter 16](https://developer.nvidia.com/gpugems/gpugems2/part-ii-shading-lighting-and-shadows/chapter-16-accurate-atmospheric-scattering).
 The solar disk, atmospheric extinction, and directional light share one sun
-position. Colors are lit in linear space, tone mapped at fixed exposure, and
+position. Colors are lit in linear space, multiplied by camera shutter/gain, tone mapped, and
 converted to sRGB. Ambient skylight and distant ground haze are approximations;
 clouds, multiple scattering, stars, and photometric calibration are not implemented.
 The ground shadow uses an analytic intersection with the stationary demo cube;
@@ -152,6 +176,7 @@ is a possible optimization as the yard grows.
 - `src/main.c`: application lifecycle, cube geometry, rendering, and input.
 - `src/astronomy.c`: sun/moon ephemeris and local calendar conversion.
 - `src/skyglow.c`: offline site profiles and location-dependent night lighting.
+- `src/camera.c`: camera profiles, manual exposure, and gain response.
 - `tools/fetch-skyglow.py`: explicit numeric atlas download and site sampling.
 - `tests/astronomy_test.c`: astronomy reference and calendar regression checks.
 - `src/sokol.m`: Sokol implementation compiled as Objective-C for macOS/Metal.

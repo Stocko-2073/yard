@@ -59,7 +59,7 @@ the sky radiance, the uniform-hemisphere irradiance approximation, followed by
 the existing normal-dependent ambient factor. The sky and distant haze receive
 the same radiance. Solar scattering and directional sunlight are unchanged.
 
-This is relative lighting at the existing fixed exposure, not a lux-calibrated
-sensor model. The atlas supplies no directional light domes, lamp spectra, cloud
+This is relative lighting passed through the configurable manual camera exposure
+(see [camera model](../design/CAMERA.md)), not a lux-calibrated sensor model. The atlas supplies no directional light domes, lamp spectra, cloud
 amplification, or lunar contribution. A site's atlas year stays fixed while
 simulation time advances; it is not a historical or future lighting prediction.
