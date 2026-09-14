@@ -8,19 +8,22 @@ SHADER_LANGS := metal_macos:metal_ios:metal_sim:hlsl5:glsl430:glsl300es:wgsl
 SHADER_HEADER := build/generated/cube.glsl.h
 
 .DELETE_ON_ERROR:
-.PHONY: all run smoke-test clean setup-tools shaders
+.PHONY: all run smoke-test test clean setup-tools shaders
 all: build/yard
 
 build:
 	mkdir -p build
 
-build/main.o: src/main.c $(HEADERS) $(SHADER_HEADER) | build
+build/main.o: src/main.c src/astronomy.h $(HEADERS) $(SHADER_HEADER) | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 build/sokol.o: src/sokol.m $(HEADERS) | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fobjc-arc -c $< -o $@
 
-build/yard: build/main.o build/sokol.o
+build/astronomy.o: src/astronomy.c src/astronomy.h | build
+	$(CC) $(CFLAGS) -c $< -o $@
+
+build/yard: build/main.o build/sokol.o build/astronomy.o
 	$(CC) $^ $(FRAMEWORKS) -o $@
 
 run: build/yard
@@ -28,6 +31,12 @@ run: build/yard
 
 smoke-test: build/yard
 	./build/yard --smoke-test
+
+build/astronomy-test: tests/astronomy_test.c src/astronomy.c src/astronomy.h | build
+	$(CC) $(CFLAGS) -Isrc tests/astronomy_test.c src/astronomy.c -o $@
+
+test: build/astronomy-test
+	./build/astronomy-test
 
 clean:
 	rm -rf build
