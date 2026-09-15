@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect Yard USB reference firmware frames on macOS/Linux (stdlib only)."""
+"""Collect Yard USB/Wi-Fi reference firmware frames on macOS/Linux (stdlib only)."""
 import argparse
 import contextlib
 import datetime
@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import select
 import shutil
+import socket
 import termios
 import time
 import tty
@@ -28,10 +29,10 @@ class Stream:
         while len(self.buffer) < size:
             remaining = deadline - time.monotonic()
             if remaining <= 0 or not select.select([self.fd], [], [], remaining)[0]:
-                raise TimeoutError('USB read timed out; reconnect/reset before retrying')
+                raise TimeoutError('capture read timed out; reconnect (reset the board for USB) before retrying')
             chunk = os.read(self.fd, 65536)
             if not chunk:
-                raise EOFError('USB disconnected')
+                raise EOFError('capture connection closed')
             self.buffer.extend(chunk)
         data = bytes(self.buffer[:size])
         del self.buffer[:size]
@@ -54,7 +55,7 @@ class Stream:
         while data:
             count = os.write(self.fd, data)
             if not count:
-                raise EOFError('USB write failed')
+                raise EOFError('capture connection write failed')
             data = data[count:]
 
 
@@ -81,6 +82,31 @@ def connect(port):
                 pass
         os.close(fd)
 
+
+class TCPStream(Stream):
+    def __init__(self, connection):
+        super().__init__(connection.fileno())
+        self.connection = connection
+
+    def command(self, text):
+        self.connection.sendall((text + '\n').encode('ascii'))
+
+
+def load_token(path):
+    token = path.read_text().strip()
+    if len(token) != 64 or any(c not in '0123456789abcdefABCDEF' for c in token):
+        raise ValueError('capture token must be 64 hexadecimal characters')
+    return token
+
+
+@contextlib.contextmanager
+def connect_tcp(host, port, token):
+    with socket.create_connection((host, port), timeout=20) as connection:
+        stream = TCPStream(connection)
+        stream.command('AUTH ' + token)
+        if stream.record().get('type') != 'authenticated':
+            raise ValueError('camera authentication was not accepted')
+        yield stream
 
 
 def readback(settings):
@@ -134,7 +160,11 @@ def collect(stream, output, aec, gain, count, manifest):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--port', required=True)
+    transport = parser.add_mutually_exclusive_group(required=True)
+    transport.add_argument('--port', help='USB serial device')
+    transport.add_argument('--host', help='camera IP address or .local hostname')
+    parser.add_argument('--tcp-port', type=int, default=4765)
+    parser.add_argument('--token-file', type=Path, help='capture token saved by configure_wifi.py')
     parser.add_argument('--output', type=Path, required=True, help='new directory; never overwritten')
     parser.add_argument('--aec', type=int, default=202)
     parser.add_argument('--gain-index', type=int, default=0)
@@ -144,6 +174,11 @@ def main():
     args = parser.parse_args()
     if not (0 <= args.aec <= 1200 and 0 <= args.gain_index <= 30 and 1 <= args.frames <= 300):
         parser.error('AEC 0..1200, gain index 0..30, frames 1..300 required')
+    if not 1 <= args.tcp_port <= 65535:
+        parser.error('TCP port must be 1..65535')
+    if bool(args.host) != bool(args.token_file):
+        parser.error('--host requires --token-file; tokens are not used with --port')
+    token = load_token(args.token_file) if args.host else None
     elf = args.build_dir / 'yard_capture.ino.elf'
     binary = args.build_dir / 'yard_capture.ino.bin'
     provenance = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (elf, binary)}
@@ -153,14 +188,16 @@ def main():
     for artifact in (elf, binary, args.build_dir / 'build.options.json',
                      args.build_dir / 'sketch' / 'yard_capture.ino.cpp'):
         shutil.copy2(artifact, artifacts / artifact.name)
-    manifest = dict(schema='yard-usb-capture-v1', status='incomplete', utc_start=utc(),
+    manifest = dict(schema='yard-camera-capture-v1', status='incomplete', utc_start=utc(),
                     scene=args.scene, firmware_artifact_sha256=provenance,
+                    transport='tcp' if args.host else 'usb',
                     timestamp_basis='driver first DMA buffer, microseconds since boot; UTC is host receipt only',
                     utc_sync_uncertainty_ms=None, sensor_dropped_frames=None,
-                    cadence='single buffer, USB backpressure; not a continuous sensor-rate recording',
+                    cadence='single buffer, transport backpressure; not a continuous sensor-rate recording',
                     frames=[])
     try:
-        with connect(args.port) as stream:
+        connection = connect_tcp(args.host, args.tcp_port, token) if args.host else connect(args.port)
+        with connection as stream:
             stream.command('INFO')
             info = stream.record()
             manifest['device'] = info

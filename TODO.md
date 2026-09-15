@@ -13,7 +13,7 @@ below are future work. See [camera design and current limits](design/CAMERA.md).
       with recorded exposure/gain, firmware revision, pixel format, and clock
       settings. Include static scenes and controlled camera motion.
       [Collection protocol and metadata template](design/CAMERA_REFERENCE.md) are
-      prepared. USB firmware/collector and a 360-frame indoor bring-up sweep are
+      prepared. USB/Wi-Fi capture tooling and a 360-frame indoor bring-up sweep are
       verified; the outdoor reference set and controlled motion remain outstanding.
 - [ ] Verify SVGA line timing and the exposure/frame-period relationship on the
       actual module. Replace inferred profile timings with measured values.

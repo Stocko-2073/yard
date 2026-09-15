@@ -28,5 +28,5 @@ PRs. See [CLEANUP_WORKTREES.md](CLEANUP_WORKTREES.md) for usage and retention ru
 
 ## Hardware camera capture
 
-See [USB camera reference capture](camera-reference/README.md) for the separate
+See [USB and Wi-Fi camera reference capture](camera-reference/README.md) for the separate
 Arduino firmware and Python collector used for OV2640 bring-up and static sweeps.

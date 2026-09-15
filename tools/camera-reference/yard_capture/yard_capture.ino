@@ -1,18 +1,53 @@
-// USB-only hardware reference capture. See ../README.md for protocol and limits.
+// USB and Wi-Fi hardware reference capture. See ../README.md for protocol and limits.
 #include <Arduino.h>
 #include "esp_camera.h"
 #include "esp_app_desc.h"
 #include "cJSON.h"
+#include <WiFi.h>
+#include <Preferences.h>
+#include <ESPmDNS.h>
 
 static sensor_t *sensor;
 static esp_err_t camera_error;
 static const int discard_count = 8;
+static const uint16_t capture_port = 4765;
+static NetworkServer server(capture_port, 1);
+static NetworkClient client;
+static Print *reply = &Serial;
+static bool network_reply = false;
+static bool authenticated = false;
+static bool wifi_configured = false;
+static bool listening = false;
+static String access_token;
+static String hostname;
+static String usb_command, tcp_command;
+static bool usb_overflow = false, tcp_overflow = false;
+static uint32_t client_activity = 0, last_reconnect = 0;
 
-static void send_json(cJSON *j) {
+// A failed/partial network write terminates that session. Capture always returns
+// its frame buffer, and a subsequent TCP connection starts with fresh framing.
+static bool write_bytes(const uint8_t *data, size_t size) {
+  size_t sent = 0;
+  while (sent < size) {
+    if (network_reply ? !client.connected() : !Serial) return false;
+    size_t chunk = size - sent;
+    if (chunk > 4096) chunk = 4096;
+    size_t n = reply->write(data + sent, chunk);
+    if (!n) { if (network_reply) client.stop(); return false; }
+    sent += n;
+  }
+  return true;
+}
+static bool write_text(const char *text) {
+  return write_bytes((const uint8_t *)text, strlen(text));
+}
+
+static bool send_json(cJSON *j) {
   char *text = cJSON_PrintUnformatted(j);
-  Serial.println(text);
+  bool ok = text && write_text(text) && write_text("\n");
   cJSON_free(text);
   cJSON_Delete(j);
+  return ok;
 }
 static void error(const char *message) {
   cJSON *j = cJSON_CreateObject();
@@ -38,6 +73,7 @@ static void info() {
   cJSON_AddStringToObject(j, "pixel_format", "JPEG");
   cJSON_AddNumberToObject(j, "jpeg_quality", 10);
   cJSON_AddNumberToObject(j, "frame_buffers", 1);
+  cJSON_AddStringToObject(j, "transport", network_reply ? "tcp" : "usb");
   send_json(j);
 }
 static void capture(int aec, int gain, int count) {
@@ -85,7 +121,7 @@ static void capture(int aec, int gain, int count) {
     if (value < 0) read_failed = true;
     cJSON_AddNumberToObject(regs, key, value);
   }
-  send_json(j);
+  if (!send_json(j)) return;
   if (read_failed) { error("register read failed"); return; }
   for (int i = 0; i < count; ++i) {
     camera_fb_t *fb = esp_camera_fb_get();
@@ -97,18 +133,134 @@ static void capture(int aec, int gain, int count) {
     cJSON_AddNumberToObject(j, "width", fb->width);
     cJSON_AddNumberToObject(j, "height", fb->height);
     cJSON_AddNumberToObject(j, "dma_timestamp_us", (double)fb->timestamp.tv_sec * 1000000 + fb->timestamp.tv_usec);
-    send_json(j);
-    size_t sent = 0;
-    while (sent < fb->len && Serial) {
-      size_t n = Serial.write(fb->buf + sent, fb->len - sent);
-      if (!n) break;
-      sent += n;
-    }
-    bool complete = sent == fb->len;
+    bool complete = send_json(j) && write_bytes(fb->buf, fb->len);
     esp_camera_fb_return(fb);
     if (!complete) return;
   }
-  Serial.println("{\"type\":\"done\"}");
+  write_text("{\"type\":\"done\"}\n");
+}
+// Credentials are provisioned over USB and kept in one NVS value, never in
+// firmware binaries or capture metadata. USB remains usable if Wi-Fi is absent.
+static bool valid_token(const char *token) {
+  if (!token || strlen(token) != 64) return false;
+  for (const char *p = token; *p; ++p) if (!isxdigit((unsigned char)*p)) return false;
+  return true;
+}
+static bool valid_config(cJSON *j) {
+  cJSON *ssid = cJSON_GetObjectItemCaseSensitive(j, "ssid");
+  cJSON *password = cJSON_GetObjectItemCaseSensitive(j, "password");
+  cJSON *token = cJSON_GetObjectItemCaseSensitive(j, "token");
+  return cJSON_IsString(ssid) && strlen(ssid->valuestring) > 0 && strlen(ssid->valuestring) <= 32 &&
+    cJSON_IsString(password) && (strlen(password->valuestring) == 0 ||
+      (strlen(password->valuestring) >= 8 && strlen(password->valuestring) <= 63)) &&
+    cJSON_IsString(token) && valid_token(token->valuestring);
+}
+static void start_wifi(cJSON *config) {
+  client.stop(); server.end(); MDNS.end(); listening = false;
+  WiFi.persistent(false);
+  WiFi.disconnect(true, false);
+  WiFi.setHostname(hostname.c_str());
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  access_token = cJSON_GetObjectItemCaseSensitive(config, "token")->valuestring;
+  wifi_configured = true;
+  WiFi.begin(cJSON_GetObjectItemCaseSensitive(config, "ssid")->valuestring,
+             cJSON_GetObjectItemCaseSensitive(config, "password")->valuestring);
+  last_reconnect = millis();
+}
+static void wifi_status() {
+  cJSON *j = cJSON_CreateObject();
+  cJSON_AddStringToObject(j, "type", "wifi_status");
+  cJSON_AddBoolToObject(j, "configured", wifi_configured);
+  cJSON_AddBoolToObject(j, "connected", WiFi.status() == WL_CONNECTED);
+  cJSON_AddStringToObject(j, "hostname", hostname.c_str());
+  cJSON_AddStringToObject(j, "ip", WiFi.localIP().toString().c_str());
+  cJSON_AddNumberToObject(j, "port", capture_port);
+  send_json(j);
+}
+static void configure_wifi(const char *json) {
+  cJSON *j = cJSON_Parse(json);
+  if (!valid_config(j)) { cJSON_Delete(j); error("invalid Wi-Fi configuration"); return; }
+  Preferences prefs;
+  bool saved = prefs.begin("yard-camera", false);
+  if (saved) {
+    saved = prefs.putString("wifi", json) == strlen(json);
+    prefs.end();
+  }
+  if (!saved) { cJSON_Delete(j); error("cannot save Wi-Fi configuration"); return; }
+  start_wifi(j);
+  cJSON_Delete(j);
+  write_text("{\"type\":\"wifi_saved\"}\n");
+}
+static void clear_wifi() {
+  Preferences prefs;
+  if (!prefs.begin("yard-camera", false)) { error("cannot open Wi-Fi configuration"); return; }
+  bool ok = !prefs.isKey("wifi") || prefs.remove("wifi");
+  prefs.end();
+  if (!ok) { error("cannot clear Wi-Fi configuration"); return; }
+  client.stop(); server.end(); MDNS.end();
+  WiFi.disconnect(true, true);
+  listening = false; wifi_configured = false; access_token = "";
+  wifi_status();
+}
+static void service_wifi() {
+  if (!wifi_configured) return;
+  if (WiFi.status() != WL_CONNECTED) {
+    if (listening) { client.stop(); server.end(); MDNS.end(); listening = false; }
+    if (millis() - last_reconnect > 15000) { WiFi.reconnect(); last_reconnect = millis(); }
+    return;
+  }
+  if (!listening) {
+    server.begin(); server.setNoDelay(true);
+    listening = (bool)server;
+    if (MDNS.begin(hostname.c_str())) MDNS.addService("yard-camera", "tcp", capture_port);
+  }
+  if (!client.connected()) {
+    client.stop();
+    client = server.accept();
+    authenticated = false; tcp_command = ""; tcp_overflow = false;
+    client_activity = millis();
+    if (client) client.setNoDelay(true);
+  } else if (millis() - client_activity > 10000) {
+    // An idle/partial command must not reserve the camera indefinitely.
+    client.stop();
+  }
+}
+// Accumulate complete lines only; overflow is discarded through the newline.
+static bool read_command(Stream &input, String &pending, bool &overflow) {
+  while (input.available()) {
+    int ch = input.read();
+    if (ch < 0) break;
+    if (ch == '\n') {
+      if (overflow) { pending = ""; overflow = false; error("command too long"); return false; }
+      pending.trim();
+      return true;
+    }
+    if (!overflow) {
+      if (pending.length() >= 1024) { overflow = true; pending = ""; }
+      else pending += (char)ch;
+    }
+  }
+  return false;
+}
+static void handle_command(const String &command) {
+  if (network_reply && !authenticated) {
+    if (command.startsWith("AUTH ") && command.substring(5) == access_token) {
+      authenticated = true;
+      write_text("{\"type\":\"authenticated\"}\n");
+    } else { error("authentication failed"); client.stop(); }
+    return;
+  }
+  if (command == "INFO") { info(); return; }
+  if (!network_reply) {
+    if (command == "WIFI_STATUS") { wifi_status(); return; }
+    if (command == "WIFI_CLEAR") { clear_wifi(); return; }
+    if (command.startsWith("WIFI_CONFIG ")) { configure_wifi(command.c_str() + 12); return; }
+  }
+  int aec, gain, count; char extra;
+  if (sscanf(command.c_str(), "CAP %d %d %d %c", &aec, &gain, &count, &extra) == 3) {
+    capture(aec, gain, count);
+  } else error("unknown command");
 }
 void setup() {
   Serial.begin(115200);
@@ -125,13 +277,31 @@ void setup() {
   c.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   camera_error = esp_camera_init(&c);
   if (camera_error == ESP_OK) sensor = esp_camera_sensor_get();
+  char name[32];
+  snprintf(name, sizeof(name), "yard-camera-%06lx", (unsigned long)((ESP.getEfuseMac() >> 24) & 0xffffff));
+  hostname = name;
+  Preferences prefs;
+  if (prefs.begin("yard-camera", true)) {
+    String saved = prefs.getString("wifi", "");
+    prefs.end();
+    cJSON *config = cJSON_Parse(saved.c_str());
+    if (valid_config(config)) start_wifi(config);
+    cJSON_Delete(config);
+  }
 }
 void loop() {
-  if (!Serial.available()) { delay(10); return; }
-  String command = Serial.readStringUntil('\n'); command.trim();
-  if (command == "INFO") { info(); return; }
-  int aec, gain, count; char extra;
-  if (sscanf(command.c_str(), "CAP %d %d %d %c", &aec, &gain, &count, &extra) == 3) {
-    capture(aec, gain, count);
-  } else error("expected INFO or CAP aec gain_index count");
+  service_wifi();
+  reply = &Serial; network_reply = false;
+  if (read_command(Serial, usb_command, usb_overflow)) {
+    handle_command(usb_command); usb_command = "";
+  }
+  if (client.connected()) {
+    reply = &client; network_reply = true;
+    if (read_command(client, tcp_command, tcp_overflow)) {
+      handle_command(tcp_command); tcp_command = "";
+      client_activity = millis();
+    }
+  }
+  reply = &Serial; network_reply = false;
+  delay(1);
 }

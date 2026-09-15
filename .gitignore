@@ -3,3 +3,5 @@
 /tools/bin/
 /.worktrees/
 /captures/
+/local/
+__pycache__/
