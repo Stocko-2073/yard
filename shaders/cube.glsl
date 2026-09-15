@@ -119,8 +119,7 @@ void main() {
     float variation = 0.5+0.25*sin(world_position.x*1.3+sin(world_position.z*0.7))
                      +0.25*sin(world_position.z*2.1+world_position.x*0.4);
     vec3 turf = mix(vec3(0.085,0.13,0.035), vec3(0.18,0.23,0.07), variation);
-    vec3 soil = vec3(0.13,0.075,0.035);
-    vec3 albedo = mix(soil, turf, max(n.y,0.0));
+    vec3 albedo = turf;
     frag_color = vec4(display_color(surface_light(albedo, n, sun_direction.xyz,
                                                 sun_color.xyz, 1.0, night_radiance.xyz), camera_exposure.x), 1);
 }

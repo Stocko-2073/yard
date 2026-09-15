@@ -108,7 +108,7 @@ voxel volume, with no caves, editing, physics, chunking, or LOD yet.
 
 At startup, a height cache drives greedy top rectangles and merged exposed
 vertical risers. The mesh preserves the exact centimeter staircase, with green
-tops and brown risers; it does not smooth the surface. The buried bottom is
+tops and green risers; it does not smooth the surface. The buried bottom is
 omitted. All terrain is submitted in one indexed draw. This seed generates
 2,339,035 quads / 4,678,070 triangles, about 268 MiB of GPU geometry. Temporary
 CPU geometry is freed after upload; the roughly 39 MiB height cache remains for
@@ -125,7 +125,7 @@ Click to capture the mouse, use WASD to walk, Shift to move faster, and Escape
 to release. The clock starts paused when `--time` is supplied. The viewer follows
 the nearest voxel column, so movement retains 1 cm vertical steps. Outside the
 square, it follows the y=0 ground plane. This is a look prototype: simple turf
-color patches, exposed soil risers, and directional lighting, without grass
+color patches across tops and risers, and directional lighting, without grass
 blades, filtered voxel edges, terrain shadows, or photorealistic materials.
 Camera resolution, FOV, manual exposure, and preview scaling retain their existing
 behavior. In particular, 800×600 without MSAA makes distant steps visibly alias.
