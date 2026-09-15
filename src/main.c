@@ -30,6 +30,8 @@ static struct {
     double capture_elapsed;
     unsigned captures;
     sg_pipeline pipeline;
+    sg_pipeline object_pipeline;
+    sg_bindings object_bindings;
     sg_pipeline grass_pipeline;
     sg_bindings grass_bindings;
     int grass_count;
@@ -73,6 +75,41 @@ static void sunlight(const double direction[3], float color[4], double intensity
         color[i] = direction[1] > 0 ? (float)(intensity*exp(-beta_r[i]*depth_r - 0.0044*depth_m)) : 0;
     }
     color[3] = 0;
+}
+
+static void make_test_cube(void) {
+    yard_mesh_vertex vertices[24] = {0};
+    uint32_t indices[36];
+    float base = yard_terrain_height(&state.terrain,0,0)-0.08f;
+    const float center[3]={0,base+0.25f,0};
+    const int corners[4][2]={{-1,-1},{1,-1},{1,1},{-1,1}};
+    for (int face=0; face<6; ++face) {
+        int axis=face/2, a=(axis+1)%3, b=(axis+2)%3;
+        float sign=face%2 ? 1.0f : -1.0f;
+        for (int j=0; j<4; ++j) {
+            yard_mesh_vertex *v=&vertices[face*4+j];
+            memcpy(v->position,center,sizeof(center));
+            v->position[axis]+=sign*0.25f;
+            v->position[a]+=corners[j][0]*0.25f;
+            v->position[b]+=corners[j][1]*0.25f;
+            v->normal[axis]=sign;
+        }
+        const int local[6]={0,1,2,0,2,3};
+        for (int j=0; j<6; ++j) indices[face*6+j]=(uint32_t)(face*4+local[j]);
+    }
+    state.object_bindings.vertex_buffers[0]=sg_make_buffer(&(sg_buffer_desc){
+        .data=SG_RANGE(vertices),.label="baseline 50 cm cube vertices"});
+    state.object_bindings.index_buffer=sg_make_buffer(&(sg_buffer_desc){
+        .usage.index_buffer=true,.data=SG_RANGE(indices),.label="baseline cube indices"});
+    state.object_pipeline=sg_make_pipeline(&(sg_pipeline_desc){
+        .shader=sg_make_shader(object_shader_desc(sg_query_backend())),
+        .layout.attrs={
+            [ATTR_object_position].format=SG_VERTEXFORMAT_FLOAT3,
+            [ATTR_object_normal].format=SG_VERTEXFORMAT_FLOAT3},
+        .index_type=SG_INDEXTYPE_UINT32,.cull_mode=SG_CULLMODE_NONE,
+        .depth={.pixel_format=SG_PIXELFORMAT_DEPTH,.write_enabled=true,.compare=SG_COMPAREFUNC_LESS_EQUAL},
+        .colors[0].pixel_format=SG_PIXELFORMAT_RGBA16F,.sample_count=state.msaa,
+        .label="baseline cube"});
 }
 
 static void init(void) {
@@ -250,6 +287,7 @@ static void init(void) {
         state.grass_count += (r->width*r->depth+state.grass_stride-1)/state.grass_stride;
     }
     printf("Yard: %dx MSAA, %d blades before culling (stride %d)\n", state.msaa,state.grass_count,state.grass_stride);
+    make_test_cube();
     yard_mesh_destroy(&state.terrain.mesh);
     sg_shader shader = sg_make_shader(cube_shader_desc(sg_query_backend()));
     state.pipeline = sg_make_pipeline(&(sg_pipeline_desc){
@@ -379,6 +417,11 @@ static void frame(void) {
                 state.submitted_triangles += r->index_count/3;
             }
         }
+        sg_apply_pipeline(state.object_pipeline);
+        sg_apply_bindings(&state.object_bindings);
+        sg_apply_uniforms(UB_vs_params,&SG_RANGE(uniforms));
+        sg_apply_uniforms(UB_light_params,&SG_RANGE(light));
+        sg_draw(0,36,1);
         if (state.grass_count > 0) {
             sg_apply_pipeline(state.grass_pipeline);
             sg_apply_uniforms(UB_vs_params, &SG_RANGE(uniforms));

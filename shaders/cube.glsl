@@ -130,6 +130,19 @@ void main() {
 }
 @end
 
+@fs object_fs
+@include_block scene_light
+@include_block lighting
+in vec3 world_normal;
+in vec3 world_position;
+out vec4 frag_color;
+void main() {
+    frag_color=vec4(display_color(surface_light(vec3(0.55),normalize(world_normal),
+        sun_direction.xyz,sun_color.xyz,1.0,night_radiance.xyz),camera_exposure.x),1);
+}
+@end
+@program object vs object_fs
+
 @vs sky_vs
 @glsl_options fixup_clipspace
 in vec2 position;
