@@ -14,7 +14,10 @@ below are future work. See [camera design and current limits](design/CAMERA.md).
       settings. Include static scenes and controlled camera motion.
       [Collection protocol and metadata template](design/CAMERA_REFERENCE.md) are
       prepared. USB/Wi-Fi capture tooling and a 360-frame indoor bring-up sweep are
-      verified; the outdoor reference set and controlled motion remain outstanding.
+      verified. An [outdoor twilight session](data/camera-reference/OUTDOOR_TWILIGHT.md)
+      adds 333 retained images, with acquisition failures and baseline drift noted.
+      Daylight, full-night, repeatable target scenes, and controlled motion remain
+      outstanding.
 - [ ] Verify SVGA line timing and the exposure/frame-period relationship on the
       actual module. Replace inferred profile timings with measured values.
 - [ ] Calibrate render brightness against the reference captures across shutter

@@ -3,7 +3,9 @@
 Status: USB/Wi-Fi firmware and collection tooling have been verified against a connected
 OV2640, including a 360-frame indoor static sweep. See the
 [indoor bring-up record](../data/camera-reference/INDOOR_BRINGUP.md) and
-[Wi-Fi validation](../data/camera-reference/WIFI_BRINGUP.md). The first camera TODO
+[Wi-Fi validation](../data/camera-reference/WIFI_BRINGUP.md). A
+[partial outdoor twilight session](../data/camera-reference/OUTDOOR_TWILIGHT.md)
+has also been collected, with limitations recorded. The first camera TODO
 remains open until the outdoor and controlled-motion reference set below exists. This procedure targets the original XIAO ESP32-S3
 Sense with OV2640, using its installed lens and 800×600 SVGA output.
 
