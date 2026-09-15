@@ -13,6 +13,7 @@
 #include "astronomy.h"
 #include "skyglow.h"
 #include "camera.h"
+#include "terrain.h"
 
 
 static struct {
@@ -35,9 +36,11 @@ static struct {
     bool keys[SAPP_MAX_KEYCODES];
     int64_t title_minute;
     sg_bindings bindings;
-    float angle;
+    yard_terrain terrain;
+    float eye_height;
     bool paused;
-    bool smoke_test;
+    bool smoke_test, terrain_smoke_test;
+    double smoke_elapsed;
 } state;
 
 static void sunlight(const double direction[3], float color[4], double intensity) {
@@ -108,56 +111,54 @@ static void init(void) {
         .label = "atmosphere and ground",
     });
 
-    // Separate vertices per face let each face have a solid color.
-    static const float vertices[][6] = {
-        {-1,-1, 1, .35f,.75f,.45f}, { 1,-1, 1, .35f,.75f,.45f},
-        { 1, 1, 1, .35f,.75f,.45f}, {-1, 1, 1, .35f,.75f,.45f},
-        { 1,-1,-1, .25f,.45f,.65f}, {-1,-1,-1, .25f,.45f,.65f},
-        {-1, 1,-1, .25f,.45f,.65f}, { 1, 1,-1, .25f,.45f,.65f},
-        { 1,-1, 1, .85f,.55f,.25f}, { 1,-1,-1, .85f,.55f,.25f},
-        { 1, 1,-1, .85f,.55f,.25f}, { 1, 1, 1, .85f,.55f,.25f},
-        {-1,-1,-1, .65f,.35f,.45f}, {-1,-1, 1, .65f,.35f,.45f},
-        {-1, 1, 1, .65f,.35f,.45f}, {-1, 1,-1, .65f,.35f,.45f},
-        {-1, 1, 1, .75f,.85f,.55f}, { 1, 1, 1, .75f,.85f,.55f},
-        { 1, 1,-1, .75f,.85f,.55f}, {-1, 1,-1, .75f,.85f,.55f},
-        {-1,-1,-1, .40f,.30f,.25f}, { 1,-1,-1, .40f,.30f,.25f},
-        { 1,-1, 1, .40f,.30f,.25f}, {-1,-1, 1, .40f,.30f,.25f},
-    };
-    static const uint16_t indices[] = {
-        0,1,2, 0,2,3, 4,5,6, 4,6,7, 8,9,10, 8,10,11,
-        12,13,14, 12,14,15, 16,17,18, 16,18,19, 20,21,22, 20,22,23,
-    };
+    if (!yard_terrain_create(&state.terrain, YARD_TERRAIN_SIZE)) {
+        fprintf(stderr, "Cannot allocate terrain or build its mesh.\n");
+        exit(EXIT_FAILURE);
+    }
+    printf("Yard: %.2f m square, %zu voxel bytes, %zu quads (%zu triangles), %.1f MiB mesh\n",
+           state.terrain.size*0.01, (size_t)state.terrain.size*state.terrain.size*YARD_TERRAIN_DEPTH,
+           state.terrain.quads, state.terrain.quads*2,
+           state.terrain.quads*(4*sizeof(yard_terrain_vertex)+6*sizeof(uint32_t))/1048576.0);
     state.bindings.vertex_buffers[0] = sg_make_buffer(&(sg_buffer_desc){
-        .data = SG_RANGE(vertices), .label = "cube vertices",
+        .data = {state.terrain.vertices, state.terrain.quads*4*sizeof(yard_terrain_vertex)},
+        .label = "static voxel terrain vertices",
     });
     state.bindings.index_buffer = sg_make_buffer(&(sg_buffer_desc){
         .usage.index_buffer = true,
-        .data = SG_RANGE(indices), .label = "cube indices",
+        .data = {state.terrain.indices, state.terrain.quads*6*sizeof(uint32_t)},
+        .label = "static voxel terrain indices",
     });
+    if (sg_query_buffer_state(state.bindings.vertex_buffers[0]) != SG_RESOURCESTATE_VALID ||
+        sg_query_buffer_state(state.bindings.index_buffer) != SG_RESOURCESTATE_VALID) {
+        fprintf(stderr, "Cannot upload terrain mesh.\n");
+        exit(EXIT_FAILURE);
+    }
+    yard_terrain_free_mesh(&state.terrain);
     sg_shader shader = sg_make_shader(cube_shader_desc(sg_query_backend()));
     state.pipeline = sg_make_pipeline(&(sg_pipeline_desc){
         .shader = shader,
         .layout.attrs = {
             [ATTR_cube_position].format = SG_VERTEXFORMAT_FLOAT3,
-            [ATTR_cube_color].format = SG_VERTEXFORMAT_FLOAT3,
+            [ATTR_cube_normal].format = SG_VERTEXFORMAT_FLOAT3,
         },
-        .index_type = SG_INDEXTYPE_UINT16,
+        .index_type = SG_INDEXTYPE_UINT32,
         .cull_mode = SG_CULLMODE_BACK,
         .face_winding = SG_FACEWINDING_CCW,
         .depth = {.pixel_format = SG_PIXELFORMAT_DEPTH, .write_enabled = true, .compare = SG_COMPAREFUNC_LESS_EQUAL},
         .colors[0].pixel_format = SG_PIXELFORMAT_RGBA8,
         .sample_count = 1,
-        .label = "cube pipeline",
+        .label = "voxel terrain pipeline",
     });
 }
 
 static void frame(void) {
+    if (state.captures > 0) state.smoke_elapsed += sapp_frame_duration();
     float dt = (float)fmin(sapp_frame_duration(), 0.1);
     if (!state.paused) state.utc += dt * 360.0; // Four minutes per day.
     state.utc += dt * 7200.0 * ((int)state.keys[SAPP_KEYCODE_RIGHT] - (int)state.keys[SAPP_KEYCODE_LEFT]);
     // Keep the calendar within the documented range of this visual ephemeris.
     state.utc = fmax(-2208970800.0, fmin(4133998799.0, state.utc));
-    // Ground-plane navigation at fixed eye height, independent of solar time.
+    // Viewer follows the voxel surface; no rigid-body controller or collision solver.
     float forward = (float)((int)state.keys[SAPP_KEYCODE_W] - (int)state.keys[SAPP_KEYCODE_S]);
     float right = (float)((int)state.keys[SAPP_KEYCODE_D] - (int)state.keys[SAPP_KEYCODE_A]);
     float length = hypotf(forward, right);
@@ -175,6 +176,17 @@ static void frame(void) {
         state.track_moon = true;
         state.zoom = true;
     }
+    if (state.terrain_smoke_test) {
+        yard_local_datetime("2026-09-14", 9, &state.utc);
+        float progress = state.captures / 120.0f;
+        state.position[0] = 12.0f*sinf(progress*6.2831853f);
+        state.position[2] = 12.0f*cosf(progress*6.2831853f);
+        state.yaw = progress*6.2831853f;
+        state.pitch = -0.35f;
+        state.track_moon = false;
+        state.zoom = false;
+    }
+    state.position[1] = yard_terrain_height(&state.terrain, state.position[0], state.position[2]) + state.eye_height;
     yard_astronomy(state.utc, state.site.latitude, state.site.longitude, &state.ephemeris);
     if (state.track_moon) {
         state.yaw = (float)atan2(state.ephemeris.moon[0], -state.ephemeris.moon[2]);
@@ -199,7 +211,7 @@ static void frame(void) {
     if (state.captures == 0 || state.capture_elapsed >= (1.0 / state.camera.profile.fps)) {
         state.capture_elapsed = fmod(state.capture_elapsed, (1.0 / state.camera.profile.fps));
         const vs_params_t uniforms = {
-            .view = {state.yaw, state.pitch, (float)state.camera.profile.width / state.camera.profile.height, state.angle},
+            .view = {state.yaw, state.pitch, (float)state.camera.profile.width / state.camera.profile.height, 0},
             .lens = {1.0f / tanf(state.vertical_fov * 0.00872664626f), 0, 0, 0},
             .camera_position = {state.position[0], state.position[1], state.position[2], 0},
         };
@@ -237,7 +249,7 @@ static void frame(void) {
         sg_apply_bindings(&state.bindings);
         sg_apply_uniforms(UB_vs_params, &SG_RANGE(uniforms));
         sg_apply_uniforms(UB_light_params, &SG_RANGE(light));
-        sg_draw(0, 36, 1);
+        sg_draw(0, (int)(state.terrain.quads*6), 1);
         sg_end_pass();
         ++state.captures;
     }
@@ -259,9 +271,10 @@ static void frame(void) {
     sg_draw(0, 3, 1);
     sg_end_pass();
     sg_commit();
-    if (state.captures == 120 && state.smoke_test) {
-        printf("Yard: rendered 120 %dx%d camera frames on Metal at a maximum of %.1f fps (four lunar phases).\n",
-               state.camera.profile.width, state.camera.profile.height, state.camera.profile.fps);
+    if (state.captures == 120 && (state.smoke_test || state.terrain_smoke_test)) {
+        printf("Yard: rendered 120 %dx%d camera frames on Metal, %.1f fps cap, %.1f captures/s observed (%s).\n",
+               state.camera.profile.width, state.camera.profile.height, state.camera.profile.fps, 119.0/state.smoke_elapsed,
+               state.terrain_smoke_test ? "terrain orbit" : "four lunar phases");
         sapp_request_quit();
     }
 }
@@ -316,7 +329,6 @@ static void event(const sapp_event *ev) {
     }
     if (ev->key_code == SAPP_KEYCODE_R) {
         state.position[0] = 0;
-        state.position[1] = 2.5f;
         state.position[2] = 8;
         state.yaw = 0;
         state.pitch = -0.10f;
@@ -327,7 +339,7 @@ static void event(const sapp_event *ev) {
     }
 }
 
-static void cleanup(void) { sapp_lock_mouse(false); sg_shutdown(); }
+static void cleanup(void) { sapp_lock_mouse(false); sg_shutdown(); yard_terrain_destroy(&state.terrain); }
 
 sapp_desc sokol_main(int argc, char *argv[]) {
     if (setenv("TZ", "America/New_York", 1) != 0) {
@@ -336,12 +348,11 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     tzset();
     state.site = yard_default_site;
     yard_camera_init(&state.camera, &yard_ov2640_svga);
+    state.eye_height = 1.6f;
     state.vertical_fov = 60.0f; // XIAO Sense OV2640 stock lens FOV is not yet calibrated.
     state.utc = (double)time(NULL);
-    state.position[1] = 2.5f;
     state.position[2] = 8;
     state.pitch = -0.10f;
-    state.angle = 0.4f;
     state.title_minute = INT64_MIN;
     const char *requested_date = NULL;
     double requested_hour = -1;
@@ -349,6 +360,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     double exposure_ms = -1, gain = -1, exposure_lines = -1, gain_index = -1;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--smoke-test") == 0) state.smoke_test = true;
+        else if (strcmp(argv[i], "--terrain-smoke-test") == 0) state.terrain_smoke_test = true;
         else if (strcmp(argv[i], "--moon") == 0) state.track_moon = true;
         else if (strcmp(argv[i], "--zoom") == 0) state.zoom = true;
         else if (strcmp(argv[i], "--camera-profile") == 0 && i+1 < argc) profile_path = argv[++i];
@@ -370,6 +382,13 @@ sapp_desc sokol_main(int argc, char *argv[]) {
                 goto usage;
             }
         }
+        else if (strcmp(argv[i], "--eye-height") == 0 && i+1 < argc) {
+            const char *argument = argv[++i];
+            char *end;
+            state.eye_height = strtof(argument, &end);
+            if (!isfinite(state.eye_height) || end == argument || *end != '\0' ||
+                state.eye_height < 0.1f || state.eye_height > 10.0f) goto usage;
+        }
         else if (strcmp(argv[i], "--vfov") == 0 && i+1 < argc) {
             const char *argument = argv[++i];
             char *end = NULL;
@@ -386,6 +405,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
                 requested_hour < 0 || requested_hour >= 24) goto usage;
         } else goto usage;
     }
+    if (state.smoke_test && state.terrain_smoke_test) goto usage;
     if (profile_path) {
         yard_camera_profile profile;
         if (!yard_camera_profile_load(profile_path, &profile)) {
@@ -423,7 +443,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
         .logger.func = slog_func,
     };
 usage:
-    fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--smoke-test] [--site profile]\n"
+    fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--eye-height metres] [--smoke-test | --terrain-smoke-test] [--site profile]\n"
                     "Camera: [--camera-profile FILE] [--exposure-ms MS | --aec-value LINES] [--gain MULTIPLIER | --agc-gain INDEX]\n"
                     "OV2640 default: manual shutter 0-33.333333 ms (AEC 0-1200, frame-capped), gain 1-31x (index 0-30).\n"
                     "Keys: comma/period = shutter -/+ 1/3 stop; minus/equal = gain -/+ one step.\n"

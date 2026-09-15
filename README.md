@@ -28,8 +28,8 @@ make run
 ```
 
 The app opens a resizable Metal window with an atmospheric sky, date-driven sun
-and moon, a lit cube, and a ground plane with a metre grid and a directional
-sun shadow. The default camera produces a fixed **800×600, 4:3** image at up to **30 fps**,
+and moon, and a static, mildly lumpy voxel yard. A ground plane with a metre
+grid extends beyond the yard boundary. The default camera produces a fixed **800×600, 4:3** image at up to **30 fps**,
 matching the OV2640's SVGA output dimensions and maximum nominal frame rate
 ([sensor datasheet](https://files.waveshare.com/wiki/common/OV2640DS_en.pdf)).
 The window starts at 800×600 logical pixels. Resizing letterboxes the same camera
@@ -66,7 +66,8 @@ system's `America/New_York` timezone database, including daylight saving.
 - **Left click**: capture the mouse; move the mouse to look. **Escape** releases
   it; press Escape again while released to quit. Losing focus releases the mouse.
   Movement and mouse look cancel moon tracking and work while time is paused.
-  This is viewer navigation at a fixed 2.5 m eye height, without collision handling.
+  The viewer follows the voxel surface at a default 1.6 m eye height, without
+  collision handling. Set `--eye-height METRES` (0.1–10) for other viewpoints.
 - **M**: toggle moon tracking. A moon below the horizon remains hidden by ground;
   its status appears in the title. Step time forward to see it rise.
 - **Z**: toggle 8× digital preview magnification of the captured image; it does
@@ -96,6 +97,46 @@ a published position example, and calendar/DST boundaries, without a GUI.
 moon dates on Metal, then exits; it requires a graphical macOS session and checks
 rendering execution, not visual correctness. `make clean` removes build output.
 
+## Static voxel yard prototype
+
+The yard is **63.61 × 63.61 m** (4,046.23 m², just under one acre), represented
+by **6,361 × 6,361 × 32 one-centimeter cells**, with one byte per cell. The
+1,294,794,272-byte dense array remains resident: 0 means air and 1 means soil.
+The fixed slab runs from y=0 to y=0.32 m; gentle deterministic humps put the
+surface roughly 8–30 cm above its base. This is a filled height field inside a
+voxel volume, with no caves, editing, physics, chunking, or LOD yet.
+
+At startup, a height cache drives greedy top rectangles and merged exposed
+vertical risers. The mesh preserves the exact centimeter staircase, with green
+tops and brown risers; it does not smooth the surface. The buried bottom is
+omitted. All terrain is submitted in one indexed draw. This seed generates
+2,339,035 quads / 4,678,070 triangles, about 268 MiB of GPU geometry. Temporary
+CPU geometry is freed after upload; the roughly 39 MiB height cache remains for
+navigation. Initial generation/upload can take a few seconds.
+
+For a daylight walk, or a low camera view where the steps are easier to inspect:
+
+```sh
+./build/yard --date 2026-09-14 --time 9
+./build/yard --date 2026-09-14 --time 9 --eye-height 0.4
+```
+
+Click to capture the mouse, use WASD to walk, Shift to move faster, and Escape
+to release. The clock starts paused when `--time` is supplied. The viewer follows
+the nearest voxel column, so movement retains 1 cm vertical steps. Outside the
+square, it follows the y=0 ground plane. This is a look prototype: simple turf
+color patches, exposed soil risers, and directional lighting, without grass
+blades, filtered voxel edges, terrain shadows, or photorealistic materials.
+Camera resolution, FOV, manual exposure, and preview scaling retain their existing
+behavior. In particular, 800×600 without MSAA makes distant steps visibly alias.
+
+`./build/yard --terrain-smoke-test --eye-height 0.4` renders 120 frames along a
+scripted daytime orbit and exits. It reports observed capture cadence excluding
+startup; this is an execution/cadence check, not a GPU timing benchmark or a test
+of physical mouse/keyboard input. `make smoke-test` retains the lunar-phase check.
+`make test` also checks voxel occupancy, surface area, mesh winding and indices,
+and navigation height queries on smaller terrain fixtures.
+
 ## Camera exposure
 
 Manual controls follow the OV2640's line-based shutter and Espressif gain steps.
@@ -123,7 +164,7 @@ and gain steps for other cameras. The default stays OV2640 SVGA. See
 
 Night ambient uses David Lorenz's [2025 Light Pollution Atlas](https://djlorenz.github.io/astronomy/lp/).
 The bundled sample at the default coordinates has artificial zenith brightness
-**5.44× the natural sky** (6.44× total). Sky, ground, and cube share this light;
+**5.44× the natural sky** (6.44× total). Sky and terrain share this light;
 it fades out through astronomical twilight. The app remains offline.
 
 To use another location, download a site profile once with Python 3, then load it:
@@ -168,12 +209,13 @@ The solar disk, atmospheric extinction, and directional light share one sun
 position. Colors are lit in linear space, multiplied by camera shutter/gain, tone mapped, and
 converted to sRGB. Ambient skylight and distant ground haze are approximations;
 clouds, multiple scattering, stars, and photometric calibration are not implemented.
-The ground shadow uses an analytic intersection with the stationary demo cube;
-a general scene will need a scene shadow system. The sky integrates 16 view
+Terrain uses directional sunlight and ambient sky lighting, with no terrain
+self-shadowing or ambient occlusion yet. The sky integrates 16 view
 samples with eight sun samples each per fragment; a cached sky lookup texture
 is a possible optimization as the yard grows.
 
-- `src/main.c`: application lifecycle, cube geometry, rendering, and input.
+- `src/main.c`: application lifecycle, rendering, and input.
+- `src/terrain.c`: dense centimeter voxels, static surface meshing, and height queries.
 - `src/astronomy.c`: sun/moon ephemeris and local calendar conversion.
 - `src/skyglow.c`: offline site profiles and location-dependent night lighting.
 - `src/camera.c`: camera profiles, manual exposure, and gain response.

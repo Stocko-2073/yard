@@ -83,24 +83,22 @@ vec3 surface_light(vec3 albedo, vec3 normal, vec3 sun, vec3 sunlight, float visi
 @vs vs
 @glsl_options fixup_clipspace
 layout(binding=0) uniform vs_params {
-    vec4 view; // yaw, pitch, aspect, cube angle
+    vec4 view; // yaw, pitch, aspect, reserved
     vec4 lens; // projection scale
     vec4 camera_position;
 };
 @include_block camera
 in vec3 position;
-in vec3 color;
-out vec3 face_color;
+in vec3 normal;
+out vec3 world_normal;
 out vec3 world_position;
 void main() {
-    float c = cos(view.w), s = sin(view.w);
-    world_position = vec3(c*position.x+s*position.z, position.y+1.0,
-                          -s*position.x+c*position.z);
+    world_position = position;
     vec3 p = transpose(camera_basis(view.xy)) * (world_position - camera_position.xyz);
     // Forward-positive camera coordinates; depth [0, 1].
     gl_Position = vec4(lens.x*p.x/view.z, lens.x*p.y,
                       (1000.0/999.9)*p.z - 100.0/999.9, p.z);
-    face_color = color;
+    world_normal = normal;
 }
 @end
 
@@ -112,15 +110,17 @@ layout(binding=1) uniform light_params {
     vec4 camera_exposure; // shutter * gain / reference exposure
 };
 @include_block lighting
-in vec3 face_color;
+in vec3 world_normal;
 in vec3 world_position;
 out vec4 frag_color;
 void main() {
-    // Derivatives provide flat world normals without another vertex stream.
-    vec3 n = normalize(cross(dFdx(world_position), dFdy(world_position)));
-    // Orient outwards independently of backend framebuffer Y convention.
-    if (dot(n, world_position-vec3(0,1,0)) < 0.0) n = -n;
-    vec3 albedo = pow(face_color, vec3(2.2));
+    vec3 n = normalize(world_normal);
+    // Low-frequency turf patches stay continuous across merged voxel faces.
+    float variation = 0.5+0.25*sin(world_position.x*1.3+sin(world_position.z*0.7))
+                     +0.25*sin(world_position.z*2.1+world_position.x*0.4);
+    vec3 turf = mix(vec3(0.085,0.13,0.035), vec3(0.18,0.23,0.07), variation);
+    vec3 soil = vec3(0.13,0.075,0.035);
+    vec3 albedo = mix(soil, turf, max(n.y,0.0));
     frag_color = vec4(display_color(surface_light(albedo, n, sun_direction.xyz,
                                                 sun_color.xyz, 1.0, night_radiance.xyz), camera_exposure.x), 1);
 }
@@ -188,20 +188,6 @@ vec3 lunar_disk(vec3 ray) {
     vec3 transmission = sun_transmittance(vec3(0,EARTH+0.0025,0), ray);
     return vec3(0.72,0.70,0.66)*albedo*lit*coverage*transmission;
 }
-float cube_shadow(vec3 p, vec3 sun) {
-    if (sun.y <= 0.0) return 1.0;
-    // Slab intersection against the demo cube in its local space.
-    float c = cos(sky_view.w), s = sin(sky_view.w);
-    vec3 o = p - vec3(0,1,0);
-    o = vec3(c*o.x-s*o.z, o.y, s*o.x+c*o.z);
-    vec3 d = vec3(c*sun.x-s*sun.z, sun.y, s*sun.x+c*sun.z);
-    d = mix(vec3(-1), vec3(1), step(vec3(0), d)) * max(abs(d), vec3(0.00001));
-    vec3 a = (-vec3(1)-o)/d, b = (vec3(1)-o)/d;
-    vec3 lo = min(a,b), hi = max(a,b);
-    float near_t = max(max(lo.x,lo.y),lo.z);
-    float far_t = min(min(hi.x,hi.y),hi.z);
-    return far_t > max(near_t, 0.002) ? 0.0 : 1.0;
-}
 void main() {
     vec3 ray = normalize(camera_basis(sky_view.xy) *
                         vec3(screen_position.x*sky_view.z, screen_position.y, sky_lens.x));
@@ -219,7 +205,7 @@ void main() {
         grid *= 1.0-smoothstep(20.0, 60.0, distance_to_ground);
         vec3 ground = surface_light(vec3(0.16,0.20,0.10)*(1.0-0.15*grid),
                                    vec3(0,1,0), sky_sun.xyz, sky_sun_color.xyz,
-                                   cube_shadow(p, sky_sun.xyz), sky_night_radiance.xyz);
+                                   1.0, sky_night_radiance.xyz);
         result = mix(ground, sky, 1.0-exp(-distance_to_ground*0.0015));
     }
     frag_color = vec4(display_color(result, sky_camera_exposure.x), 1);
