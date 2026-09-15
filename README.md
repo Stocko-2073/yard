@@ -127,7 +127,7 @@ lighting and exposure. The previous procedural color patches are absent.
 Brightness varies with surface orientation under directional sunlight and ambient
 sky lighting; terrain-cast shadows are not yet implemented. The
 mesh has 2,781,892 vertices and 5,557,104 triangles (127.3 MiB of GPU geometry)
-and is submitted in one draw; there is no chunking, editing, or physics.
+with static draw regions for frustum culling. There is no editing or physics.
 Temporary CPU mesh data is freed after upload. A roughly 154 MiB floating-point
 height cache remains for navigation. Startup generation and upload take several
 seconds.
@@ -144,14 +144,45 @@ and two-sided, with no wind, textures, alpha blending, or crossed billboards.
 Both sides receive sunlight in this simple thin-leaf shading model; grass does
 not cast shadows on the soil or other blades yet.
 
-One instanced draw reuses a single triangle. The existing navigation heights
+Instanced draws reuse a single triangle. The existing navigation heights
 supply a 154.4 MiB immutable GPU root buffer; the vertex shader reconstructs X/Z
-and orientation from the instance ID. All blades are submitted each camera frame,
-with no density reduction, distance LOD, or CPU culling. Very distant blades are
+and orientation from the region and instance ID. Visible regions retain full
+grass density, with no distance LOD. Very distant blades are
 subpixel in the 800×600 camera and can shimmer during movement.
 Randomized roots break up the regular rows of the original cell-centered placement. The initial
 full-acre moving-view check measured 17.1 captures/sec on M1 Max/32 GB, down from
 29.5 for bare terrain; the 30 fps cap is unchanged.
+
+### Offscreen geometry culling
+
+Camera-frustum culling is enabled by default. **C** toggles it during a walk;
+`--no-culling` disables it at startup. The title shows the current setting.
+
+Terrain indices and grass heights are grouped into **625 static draw regions**,
+up to **2.56 m square** (256×256 columns). Each capture tests their axis-aligned
+bounds against the fixed sensor's six frustum planes and submits only intersecting
+regions. Terrain bounds include complete triangles that cross region boundaries;
+grass bounds include random root offsets, blade width and the full 5 cm height.
+The root hash still uses the original global voxel ID, preserving every blade's
+placement and orientation. Shared terrain vertices remain unchanged.
+
+This adds draw grouping, not streaming or persistent voxel chunks. Dense yard
+state and GPU geometry remain resident. It does not reject geometry hidden behind
+hills or blades, and intersecting regions may include some offscreen triangles.
+The packed height buffer has the same GPU size; its temporary CPU copy is freed
+after upload. Sensor FOV and preview zoom remain independent of culling.
+
+On M1 Max/32 GB, the 120-capture full-density orbit at 40 cm eye height with
+8× SSAA measured **27.4 captures/sec with culling**, versus **16.6 disabled**.
+Average submitted geometry fell from 40.46 to **9.13 million blades** and 5.56 to
+**1.25 million terrain triangles** (about 77% fewer). The disabled comparison
+retains the new grass draw grouping, so it includes its submission overhead.
+These are end-to-end measurements with a 30 fps cap, not GPU stage timings.
+
+```sh
+./build/yard --terrain-smoke-test --eye-height 0.4
+./build/yard --terrain-smoke-test --eye-height 0.4 --no-culling
+```
 
 ### Spatial supersampling and rendering diagnostics
 
@@ -173,9 +204,9 @@ model. Small grass can still alias, although spatial sampling is denser.
 For comparisons:
 
 ```sh
-./build/yard --terrain-smoke-test --eye-height 0.4 --ssaa 8 --msaa 1
-./build/yard --terrain-smoke-test --eye-height 0.4 --ssaa 1 --msaa 4
-./build/yard --terrain-smoke-test --eye-height 0.4 --ssaa 1 --msaa 1
+./build/yard --terrain-smoke-test --eye-height 0.4 --no-culling --ssaa 8 --msaa 1
+./build/yard --terrain-smoke-test --eye-height 0.4 --no-culling --ssaa 1 --msaa 4
+./build/yard --terrain-smoke-test --eye-height 0.4 --no-culling --ssaa 1 --msaa 1
 ```
 
 `--ssaa 1` uses the native camera size. `--msaa 4` can independently add four
@@ -185,14 +216,14 @@ spatial supersampling. The removed TAA experiment's T key and CLI switches are
 no longer active.
 
 `--no-grass` skips its draw while leaving data resident. `--grass-stride N` draws
-every Nth blade (1–64, default 1), retaining the selected original root and
+every Nth blade within each draw region (1–64, default 1), retaining the selected root and
 orientation. These are diagnostic density reductions, not automatic culling or
 LOD. Use the same orbit and avoid concurrent Yard instances for comparisons.
 The 30 fps capture cap remains, so fast configurations cannot report uncapped
 throughput. Startup/allocation time is excluded from the reported capture rate.
 
-Full-density grass measurements on M1 Max/32 GB using the same 120-capture
-terrain orbit, excluding startup:
+Historical full-density grass measurements before culling/draw grouping on
+M1 Max/32 GB using the same 120-capture terrain orbit, excluding startup:
 
 | Rendering | Internal size | Captures/sec |
 |---|---|---:|

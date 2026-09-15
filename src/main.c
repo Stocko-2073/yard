@@ -14,6 +14,7 @@
 #include "skyglow.h"
 #include "camera.h"
 #include "terrain.h"
+#include "visibility.h"
 
 
 static struct {
@@ -33,7 +34,9 @@ static struct {
     sg_bindings grass_bindings;
     int grass_count;
     int grass_stride, msaa;
-    bool no_grass;
+    bool no_grass, no_culling;
+    yard_draw_layout layout;
+    uint64_t submitted_grass, submitted_triangles;
     sg_pipeline sky_pipeline;
     sg_bindings sky_bindings;
     double utc;
@@ -186,6 +189,12 @@ static void init(void) {
            (size_t)state.terrain.size*state.terrain.size*YARD_TERRAIN_DEPTH,
            state.terrain.mesh.vertex_count, state.terrain.mesh.index_count/3,
            (state.terrain.mesh.vertex_count*sizeof(yard_mesh_vertex)+state.terrain.mesh.index_count*sizeof(uint32_t))/1048576.0);
+    if (!yard_draw_layout_create(&state.layout, &state.terrain)) {
+        fprintf(stderr,"Cannot build visibility draw regions.\n");
+        exit(EXIT_FAILURE);
+    }
+    printf("Yard: %d static draw regions, frustum culling %s\n",
+           state.layout.count,state.no_culling ? "off" : "on");
     state.terrain_index_count = (int)state.terrain.mesh.index_count;
     state.bindings.vertex_buffers[0] = sg_make_buffer(&(sg_buffer_desc){
         .data = {state.terrain.mesh.vertices, state.terrain.mesh.vertex_count*sizeof(yard_mesh_vertex)},
@@ -207,7 +216,7 @@ static void init(void) {
         .data = SG_RANGE(grass_triangle), .label = "5 cm grass triangle",
     });
     state.grass_bindings.vertex_buffers[1] = sg_make_buffer(&(sg_buffer_desc){
-        .data = {state.terrain.heights, (size_t)state.grass_count*sizeof(float)},
+        .data = {state.layout.roots, (size_t)state.grass_count*sizeof(float)},
         .label = "one grass root per surface voxel",
     });
     if (sg_query_buffer_state(state.grass_bindings.vertex_buffers[0]) != SG_RESOURCESTATE_VALID ||
@@ -215,6 +224,8 @@ static void init(void) {
         fprintf(stderr, "Cannot upload grass roots.\n");
         exit(EXIT_FAILURE);
     }
+    free(state.layout.roots);
+    state.layout.roots = NULL;
     state.grass_pipeline = sg_make_pipeline(&(sg_pipeline_desc){
         .shader = sg_make_shader(grass_shader_desc(sg_query_backend())),
         .layout = {
@@ -233,8 +244,12 @@ static void init(void) {
     });
     printf("Yard: %d grass blades, 5 cm tall, 5 mm wide, %.1f MiB root buffer\n",
            state.grass_count, state.grass_count*sizeof(float)/1048576.0);
-    state.grass_count = state.no_grass ? 0 : (state.grass_count+state.grass_stride-1)/state.grass_stride;
-    printf("Yard: %dx MSAA, submitting %d blades (stride %d)\n", state.msaa,state.grass_count,state.grass_stride);
+    state.grass_count = 0;
+    if (!state.no_grass) for (int i=0; i<state.layout.count; ++i) {
+        const yard_draw_region *r=&state.layout.regions[i];
+        state.grass_count += (r->width*r->depth+state.grass_stride-1)/state.grass_stride;
+    }
+    printf("Yard: %dx MSAA, %d blades before culling (stride %d)\n", state.msaa,state.grass_count,state.grass_stride);
     yard_mesh_destroy(&state.terrain.mesh);
     sg_shader shader = sg_make_shader(cube_shader_desc(sg_query_backend()));
     state.pipeline = sg_make_pipeline(&(sg_pipeline_desc){
@@ -301,8 +316,8 @@ static void frame(void) {
         struct tm local;
         yard_local_calendar(state.utc, &local);
         strftime(date, sizeof(date), "%Y-%m-%d %H:%M %Z", &local);
-        snprintf(title, sizeof(title), "Yard | %dx%d %dx SSAA %dx MSAA | Manual %.2f ms %.1fx (AEC %d, gain %d) | Lat %.5f, Lon %.5f | %s | Moon %.0f%% %s%s",
-                 state.camera.profile.width, state.camera.profile.height, state.ssaa, state.msaa, yard_camera_exposure_ms(&state.camera),
+        snprintf(title, sizeof(title), "Yard | %dx%d %dx SSAA %dx MSAA | Culling %s | Manual %.2f ms %.1fx (AEC %d, gain %d) | Lat %.5f, Lon %.5f | %s | Moon %.0f%% %s%s",
+                 state.camera.profile.width, state.camera.profile.height, state.ssaa, state.msaa, state.no_culling ? "off" : "on", yard_camera_exposure_ms(&state.camera),
                  yard_camera_gain(&state.camera), state.camera.exposure_lines, state.camera.gain_index,
                  state.site.latitude, state.site.longitude, date, state.ephemeris.illuminated*100, state.ephemeris.waxing ? "waxing" : "waning",
                  state.ephemeris.moon[1] < 0 ? " (below horizon)" : "");
@@ -351,13 +366,35 @@ static void frame(void) {
         sg_apply_bindings(&state.bindings);
         sg_apply_uniforms(UB_vs_params, &SG_RANGE(uniforms));
         sg_apply_uniforms(UB_light_params, &SG_RANGE(light));
-        sg_draw(0, state.terrain_index_count, 1);
+        yard_frustum frustum;
+        yard_frustum_make(&frustum,state.position,state.yaw,state.pitch,
+                          uniforms.view[2],uniforms.lens[0]);
+        if (state.no_culling) {
+            sg_draw(0,state.terrain_index_count,1);
+            state.submitted_triangles += state.terrain_index_count/3;
+        } else for (int i=0; i<state.layout.count; ++i) {
+            const yard_draw_region *r=&state.layout.regions[i];
+            if (r->index_count && yard_frustum_visible(&frustum,&r->ground)) {
+                sg_draw(r->index_start,r->index_count,1);
+                state.submitted_triangles += r->index_count/3;
+            }
+        }
         if (state.grass_count > 0) {
             sg_apply_pipeline(state.grass_pipeline);
-            sg_apply_bindings(&state.grass_bindings);
             sg_apply_uniforms(UB_vs_params, &SG_RANGE(uniforms));
             sg_apply_uniforms(UB_light_params, &SG_RANGE(light));
-            sg_draw(0, 3, state.grass_count);
+            for (int i=0; i<state.layout.count; ++i) {
+                const yard_draw_region *r=&state.layout.regions[i];
+                if (!state.no_culling && !yard_frustum_visible(&frustum,&r->grass)) continue;
+                const grass_region_params_t region = {.grass_region = {
+                    (float)r->x,(float)r->z,(float)r->width,0}};
+                state.grass_bindings.vertex_buffer_offsets[1]=r->root_start*(int)sizeof(float);
+                sg_apply_bindings(&state.grass_bindings);
+                sg_apply_uniforms(UB_grass_region_params,&SG_RANGE(region));
+                int count=(r->width*r->depth+state.grass_stride-1)/state.grass_stride;
+                sg_draw(0,3,count);
+                state.submitted_grass += count;
+            }
         }
         sg_end_pass();
         const downsample_params_t filter = {.output_size = {
@@ -393,6 +430,11 @@ static void frame(void) {
         printf("Yard: rendered 120 %dx%d camera frames on Metal, %.1f fps cap, %.1f captures/s observed (%s).\n",
                state.camera.profile.width, state.camera.profile.height, state.camera.profile.fps, 119.0/state.smoke_elapsed,
                state.terrain_smoke_test ? "terrain orbit" : "four lunar phases");
+        printf("Yard: average submitted %.2f million grass blades (%.1f%%), %.2f million terrain triangles (%.1f%%)\n",
+               state.submitted_grass/(120.0*1e6),
+               state.grass_count ? 100.0*state.submitted_grass/(120.0*state.grass_count) : 0,
+               state.submitted_triangles/(120.0*1e6),
+               100.0*state.submitted_triangles/(120.0*(state.terrain_index_count/3)));
         sapp_request_quit();
     }
 }
@@ -424,6 +466,11 @@ static void event(const sapp_event *ev) {
     if (ev->key_code == SAPP_KEYCODE_MINUS || ev->key_code == SAPP_KEYCODE_EQUAL) {
         yard_camera_step_gain(&state.camera, ev->key_code == SAPP_KEYCODE_EQUAL ? 1 : -1);
         state.title_minute = INT64_MIN;
+    }
+    if (ev->key_code == SAPP_KEYCODE_C) {
+        state.no_culling = !state.no_culling;
+        state.title_minute = INT64_MIN;
+        printf("Yard: frustum culling %s\n",state.no_culling ? "off" : "on");
     }
     if (ev->key_code == SAPP_KEYCODE_M) state.track_moon = !state.track_moon;
     if (ev->key_code == SAPP_KEYCODE_Z) state.zoom = !state.zoom;
@@ -457,7 +504,7 @@ static void event(const sapp_event *ev) {
     }
 }
 
-static void cleanup(void) { sapp_lock_mouse(false); sg_shutdown(); yard_terrain_destroy(&state.terrain); }
+static void cleanup(void) { sapp_lock_mouse(false); sg_shutdown(); yard_draw_layout_destroy(&state.layout); yard_terrain_destroy(&state.terrain); }
 
 sapp_desc sokol_main(int argc, char *argv[]) {
     if (setenv("TZ", "America/New_York", 1) != 0) {
@@ -482,6 +529,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--smoke-test") == 0) state.smoke_test = true;
         else if (strcmp(argv[i], "--terrain-smoke-test") == 0) state.terrain_smoke_test = true;
+        else if (strcmp(argv[i], "--no-culling") == 0) state.no_culling = true;
         else if (strcmp(argv[i], "--no-grass") == 0) state.no_grass = true;
         else if ((strcmp(argv[i], "--msaa") == 0 || strcmp(argv[i], "--ssaa") == 0 || strcmp(argv[i], "--grass-stride") == 0) && i+1 < argc) {
             bool msaa = strcmp(argv[i], "--msaa") == 0;
@@ -581,7 +629,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     };
 usage:
     fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--eye-height metres] [--smoke-test | --terrain-smoke-test] [--site profile]\n"
-                    "Rendering: [--ssaa 1|8] [--msaa 1|4] [--no-grass] [--grass-stride 1..64] (diagnostic density reduction)\n"
+                    "Rendering: [--ssaa 1|8] [--msaa 1|4] [--no-culling] [--no-grass] [--grass-stride 1..64] (diagnostic density reduction)\n"
                     "Camera: [--camera-profile FILE] [--exposure-ms MS | --aec-value LINES] [--gain MULTIPLIER | --agc-gain INDEX]\n"
                     "OV2640 default: manual shutter 0-33.333333 ms (AEC 0-1200, frame-capped), gain 1-31x (index 0-30).\n"
                     "Keys: comma/period = shutter -/+ 1/3 stop; minus/equal = gain -/+ one step.\n"

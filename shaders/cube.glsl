@@ -253,6 +253,9 @@ void main() {
 @glsl_options fixup_clipspace
 @include_block scene_view
 @include_block camera
+layout(binding=5) uniform grass_region_params {
+    vec4 grass_region; // voxel origin X/Z, region width, reserved
+};
 in vec2 blade;
 in float root_height;
 out vec3 grass_normal;
@@ -263,8 +266,11 @@ uint grass_hash(uint seed) {
 }
 void main() {
     int side = int(lens.y);
-    uint id = uint(gl_InstanceIndex)*uint(lens.z);
-    vec2 cell = vec2(int(id)%side, int(id)/side);
+    uint local_id = uint(gl_InstanceIndex)*uint(lens.z);
+    int width = int(grass_region.z);
+    ivec2 grid = ivec2(grass_region.xy)+ivec2(int(local_id)%width,int(local_id)/width);
+    uint id = uint(grid.y*side+grid.x);
+    vec2 cell = vec2(grid);
     // Separate hashes keep placement stable and independent of azimuth.
     uint h = grass_hash(id);
     vec2 axis = normalize(vec2(float(h & 65535u),float(h >> 16u))-vec2(32767.5));
