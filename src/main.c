@@ -25,6 +25,9 @@ static struct {
     double capture_elapsed;
     unsigned captures;
     sg_pipeline pipeline;
+    sg_pipeline grass_pipeline;
+    sg_bindings grass_bindings;
+    int grass_count;
     sg_pipeline sky_pipeline;
     sg_bindings sky_bindings;
     double utc;
@@ -136,6 +139,37 @@ static void init(void) {
         fprintf(stderr, "Cannot upload terrain mesh.\n");
         exit(EXIT_FAILURE);
     }
+    static const float grass_triangle[][2] = {{-0.0025f,0},{0.0025f,0},{0,0.05f}};
+    state.grass_count = state.terrain.size*state.terrain.size;
+    state.grass_bindings.vertex_buffers[0] = sg_make_buffer(&(sg_buffer_desc){
+        .data = SG_RANGE(grass_triangle), .label = "5 cm grass triangle",
+    });
+    state.grass_bindings.vertex_buffers[1] = sg_make_buffer(&(sg_buffer_desc){
+        .data = {state.terrain.heights, (size_t)state.grass_count*sizeof(float)},
+        .label = "one grass root per surface voxel",
+    });
+    if (sg_query_buffer_state(state.grass_bindings.vertex_buffers[0]) != SG_RESOURCESTATE_VALID ||
+        sg_query_buffer_state(state.grass_bindings.vertex_buffers[1]) != SG_RESOURCESTATE_VALID) {
+        fprintf(stderr, "Cannot upload grass roots.\n");
+        exit(EXIT_FAILURE);
+    }
+    state.grass_pipeline = sg_make_pipeline(&(sg_pipeline_desc){
+        .shader = sg_make_shader(grass_shader_desc(sg_query_backend())),
+        .layout = {
+            .buffers[1] = {.step_func = SG_VERTEXSTEP_PER_INSTANCE, .step_rate = 1},
+            .attrs = {
+                [ATTR_grass_blade] = {.buffer_index = 0, .format = SG_VERTEXFORMAT_FLOAT2},
+                [ATTR_grass_root_height] = {.buffer_index = 1, .format = SG_VERTEXFORMAT_FLOAT},
+            },
+        },
+        .cull_mode = SG_CULLMODE_NONE,
+        .depth = {.pixel_format = SG_PIXELFORMAT_DEPTH, .write_enabled = true, .compare = SG_COMPAREFUNC_LESS_EQUAL},
+        .colors[0].pixel_format = SG_PIXELFORMAT_RGBA8,
+        .sample_count = 1,
+        .label = "two-sided grass triangles",
+    });
+    printf("Yard: %d grass blades, 5 cm tall, 5 mm wide, %.1f MiB root buffer\n",
+           state.grass_count, state.grass_count*sizeof(float)/1048576.0);
     yard_mesh_destroy(&state.terrain.mesh);
     sg_shader shader = sg_make_shader(cube_shader_desc(sg_query_backend()));
     state.pipeline = sg_make_pipeline(&(sg_pipeline_desc){
@@ -215,7 +249,7 @@ static void frame(void) {
         state.capture_elapsed = fmod(state.capture_elapsed, (1.0 / state.camera.profile.fps));
         const vs_params_t uniforms = {
             .view = {state.yaw, state.pitch, (float)state.camera.profile.width / state.camera.profile.height, 0},
-            .lens = {1.0f / tanf(state.vertical_fov * 0.00872664626f), 0, 0, 0},
+            .lens = {1.0f / tanf(state.vertical_fov * 0.00872664626f), (float)state.terrain.size, 0, 0},
             .camera_position = {state.position[0], state.position[1], state.position[2], 0},
         };
         light_params_t light = {0};
@@ -253,6 +287,11 @@ static void frame(void) {
         sg_apply_uniforms(UB_vs_params, &SG_RANGE(uniforms));
         sg_apply_uniforms(UB_light_params, &SG_RANGE(light));
         sg_draw(0, state.terrain_index_count, 1);
+        sg_apply_pipeline(state.grass_pipeline);
+        sg_apply_bindings(&state.grass_bindings);
+        sg_apply_uniforms(UB_vs_params, &SG_RANGE(uniforms));
+        sg_apply_uniforms(UB_light_params, &SG_RANGE(light));
+        sg_draw(0, 3, state.grass_count);
         sg_end_pass();
         ++state.captures;
     }

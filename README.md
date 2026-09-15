@@ -119,15 +119,34 @@ spacing. This is neither a full-resolution 1 cm mesh nor distance-based LOD.
 
 Adjacent cells share indexed vertices through a rolling edge cache. Normals
 come from the density gradient over the extraction spacing, interpolated across
-triangles for smooth lighting. All faces use one uniform green albedo. The repeating procedural color patches
-have been removed: brightness variation now comes from surface orientation under
-directional sunlight and ambient sky lighting. Terrain-cast shadows are not yet
-implemented. The
+triangles for smooth lighting. The soil uses uniform **`#56341B`** sRGB albedo, converted to linear before
+lighting and exposure. The previous procedural color patches are absent.
+Brightness varies with surface orientation under directional sunlight and ambient
+sky lighting; terrain-cast shadows are not yet implemented. The
 mesh has 2,781,892 vertices and 5,557,104 triangles (127.3 MiB of GPU geometry)
 and is submitted in one draw; there is no chunking, editing, or physics.
 Temporary CPU mesh data is freed after upload. A roughly 154 MiB floating-point
 height cache remains for navigation. Startup generation and upload take several
 seconds.
+
+### Grass experiment
+
+Each surface voxel column carries **one upright triangle, 5 cm tall and 5 mm
+wide**, for **40,462,321 blades** over the acre. Roots sit at the centimeter cell
+centers on the density-derived surface (the coarser render mesh approximates
+that surface). A stable hash selects each blade's azimuth. The blades are green
+and two-sided, with no wind, textures, alpha blending, or crossed billboards.
+Both sides receive sunlight in this simple thin-leaf shading model; grass does
+not cast shadows on the soil or other blades yet.
+
+One instanced draw reuses a single triangle. The existing navigation heights
+supply a 154.4 MiB immutable GPU root buffer; the vertex shader reconstructs X/Z
+and orientation from the instance ID. All blades are submitted each camera frame,
+with no density reduction, distance LOD, or CPU culling. Very distant blades are
+subpixel in the single-sample 800×600 camera and can shimmer during movement.
+Cell-centered roots also reveal regular rows at some viewing angles. The initial
+full-acre moving-view check measured 17.1 captures/sec on M1 Max/32 GB, down from
+29.5 for bare terrain; the 30 fps cap is unchanged.
 
 For a daylight walk, or the low camera view used for the visual comparison:
 
@@ -144,7 +163,7 @@ navigation is not an exact triangle collision query. Outside the square, the
 viewer follows the y=0 ground plane.
 
 The surface spans the outer cell centers (63.60 m); the perimeter and bottom
-are uncapped. There are no caves in this seed, terrain self-shadows, grass blades,
+are uncapped. There are no caves in this seed, terrain self-shadows,
 or photorealistic materials. Classic marching cubes does not guarantee correct
 topology for arbitrary ambiguous density configurations; this prototype is a
 smooth height field. Camera resolution, FOV, manual exposure, single-sample

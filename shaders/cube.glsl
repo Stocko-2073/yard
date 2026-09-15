@@ -80,13 +80,17 @@ vec3 surface_light(vec3 albedo, vec3 normal, vec3 sun, vec3 sunlight, float visi
 }
 @end
 
-@vs vs
-@glsl_options fixup_clipspace
+@block scene_view
 layout(binding=0) uniform vs_params {
     vec4 view; // yaw, pitch, aspect, reserved
-    vec4 lens; // projection scale
+    vec4 lens; // projection scale, terrain column count
     vec4 camera_position;
 };
+@end
+
+@vs vs
+@glsl_options fixup_clipspace
+@include_block scene_view
 @include_block camera
 in vec3 position;
 in vec3 normal;
@@ -102,21 +106,25 @@ void main() {
 }
 @end
 
-@fs fs
+@block scene_light
 layout(binding=1) uniform light_params {
     vec4 sun_direction;
     vec4 sun_color;
     vec4 night_radiance;
     vec4 camera_exposure; // shutter * gain / reference exposure
 };
+@end
+
+@fs fs
+@include_block scene_light
 @include_block lighting
 in vec3 world_normal;
 in vec3 world_position;
 out vec4 frag_color;
 void main() {
     vec3 n = normalize(world_normal);
-    // Uniform green: visible brightness variation comes only from lighting.
-    vec3 albedo = vec3(0.13,0.18,0.05);
+    // #56341B is an sRGB albedo; convert to linear before lighting.
+    vec3 albedo = pow((vec3(86,52,27)/255.0+0.055)/1.055, vec3(2.4));
     frag_color = vec4(display_color(surface_light(albedo, n, sun_direction.xyz,
                                                 sun_color.xyz, 1.0, night_radiance.xyz), camera_exposure.x), 1);
 }
@@ -240,3 +248,46 @@ void main() {
 @end
 
 @program preview preview_vs preview_fs
+
+@vs grass_vs
+@glsl_options fixup_clipspace
+@include_block scene_view
+@include_block camera
+in vec2 blade;
+in float root_height;
+out vec3 grass_normal;
+void main() {
+    int side = int(lens.y);
+    uint id = uint(gl_InstanceIndex);
+    vec2 cell = vec2(int(id)%side, int(id)/side);
+    // Integer hash produces deterministic azimuth without a per-blade buffer.
+    uint h = id*747796405u+2891336453u;
+    h = ((h >> ((h >> 28u)+4u)) ^ h)*277803737u;
+    h = (h >> 22u) ^ h;
+    vec2 axis = normalize(vec2(float(h & 65535u),float(h >> 16u))-vec2(32767.5));
+    vec3 root = vec3((cell.x+0.5-lens.y*0.5)*0.01, root_height*0.01,
+                     (cell.y+0.5-lens.y*0.5)*0.01);
+    vec3 world = root+vec3(axis.x*blade.x,blade.y,axis.y*blade.x);
+    vec3 p = transpose(camera_basis(view.xy))*(world-camera_position.xyz);
+    gl_Position = vec4(lens.x*p.x/view.z,lens.x*p.y,
+                       (1000.0/999.9)*p.z-100.0/999.9,p.z);
+    grass_normal = vec3(-axis.y,0,axis.x);
+}
+@end
+
+@fs grass_fs
+@include_block scene_light
+@include_block lighting
+in vec3 grass_normal;
+out vec4 frag_color;
+void main() {
+    vec3 n = normalize(grass_normal);
+    // Thin, two-sided leaf: either face can receive the directional light.
+    if (dot(n,sun_direction.xyz) < 0.0) n = -n;
+    vec3 albedo = vec3(0.075,0.16,0.025);
+    frag_color = vec4(display_color(surface_light(albedo,n,sun_direction.xyz,
+                        sun_color.xyz,1.0,night_radiance.xyz),camera_exposure.x),1);
+}
+@end
+
+@program grass grass_vs grass_fs
