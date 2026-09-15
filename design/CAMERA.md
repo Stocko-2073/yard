@@ -121,6 +121,22 @@ depth and scene pipelines use matching sample counts; the preview reads the
 single-sample resolved output. Window size, Retina and preview zoom still do not
 change output resolution or projection. MSAA is a rendering option separate from
 sensor timing profiles, not a model of the OV2640 lens or photosite response.
-The current resolve averages display-encoded RGBA8 samples after exposure and
-tone mapping. Thin grass can still alias temporally; no temporal accumulation or
-shutter integration is added.
+The resolve averages display-encoded RGB and linear view depth in RGBA16F
+after exposure and tone mapping. Optional temporal accumulation follows, with
+final RGBA8 conversion. No shutter integration is added.
+
+## Temporal anti-aliasing
+
+TAA defaults on; press T to toggle or use `--no-taa`. An eight-sample, zero-mean
+subpixel projection jitter advances only on camera captures. The current and
+previous capture poses and depth reproject static scene history; depth rejection
+and neighborhood clamping limit trails. Camera cuts, explicit view reset, TAA
+toggles, exposure changes and large time jumps invalidate history. MSAA can be
+controlled independently with `--msaa 1|4`.
+
+Accumulation takes place in display-encoded floating-point color, then outputs
+the same fixed-resolution RGBA8 camera image. It is a visual filtering experiment,
+not calibrated sensor response or an exposure-time average. Cross-frame history
+can alter image features seen by a robot, including introducing softness and
+ghosting. Disable TAA for an instantaneous rendering comparison. No projection
+calibration, capture cadence, shutter/gain setting, or preview scaling changes.

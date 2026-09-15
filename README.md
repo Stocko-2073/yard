@@ -48,8 +48,9 @@ calibration will also account for lens distortion.
 
 This models resolution, aspect ratio, capture cadence, and manual shutter/gain
 response. Lens distortion, automatic exposure/gain, temporal shutter integration,
-rolling shutter, Bayer sampling, noise, and JPEG/RGB565 output are not simulated. The camera renders with **4× MSAA** by default and resolves to the same fixed
-RGBA8 image. Use `--msaa 1` to disable anti-aliasing. Sun and moon retain their physical angular sizes.
+rolling shutter, Bayer sampling, noise, and JPEG/RGB565 output are not simulated. The camera uses **4× MSAA plus TAA** by default and produces the same fixed
+RGBA8 image. Press **T** to toggle TAA, or launch with `--no-taa`.
+`--msaa 1 --no-taa` disables both anti-aliasing stages. Sun and moon retain their physical angular sizes.
 
 The default location is **Thomaston, Georgia, USA**: 32.8908277° N, 84.3271342° W
 ([US Census city coordinates](https://tigerweb.geo.census.gov/tigerwebmain/Files/acs25/tigerweb_acs25_incplace_2025_bas25_ga.html)).
@@ -70,6 +71,7 @@ system's `America/New_York` timezone database, including daylight saving.
   collision handling. Set `--eye-height METRES` (0.1–10) for other viewpoints.
 - **M**: toggle moon tracking. A moon below the horizon remains hidden by ground;
   its status appears in the title. Step time forward to see it rise.
+- **T**: toggle temporal anti-aliasing and reset its history.
 - **Z**: toggle 8× digital preview magnification of the captured image; it does
   not change the camera projection or add image detail.
 - **1/2/3/4**: select 07:00/noon/19:00/midnight on the current local date and pause.
@@ -151,12 +153,13 @@ full-acre moving-view check measured 17.1 captures/sec on M1 Max/32 GB, down fro
 ### Anti-aliasing and rendering diagnostics
 
 `--msaa 4` (default) renders scene color and depth with four coverage samples per
-pixel, then resolves into the fixed 800×600 image for preview. `--msaa 1` retains
-the original single-sample path. This improves triangle-edge coverage, including
+pixel, then resolves before temporal accumulation and final 800×600 RGBA8 conversion. `--msaa 1` selects
+single-sample rasterization; TAA is controlled separately. This improves triangle-edge coverage, including
 grass silhouettes; it does not add sensor pixels or change FOV. It cannot remove
 all subpixel grass shimmer, regular placement patterns, or temporal aliasing.
-The built-in resolve averages the existing display-encoded RGBA8 samples; this
-is a rendering approximation, not calibrated lens/sensor filtering.
+The built-in resolve averages display-encoded RGB and view-depth alpha in
+RGBA16F. The final image is converted to RGBA8 after TAA. These are rendering
+approximations, not calibrated lens/sensor filtering.
 
 For controlled comparisons, `--no-grass` skips the grass draw while keeping its
 data resident. `--grass-stride N` draws every Nth blade (1–64, default 1); root
@@ -166,7 +169,7 @@ continues to cap captures at 30 fps, so faster configurations cannot report thei
 uncapped throughput. Use the same `--terrain-smoke-test --eye-height 0.4` orbit
 when comparing runs; avoid other running Yard instances.
 
-Measured on the M1 Max/32 GB with the 120-capture orbit (startup excluded):
+Measurements before TAA, on M1 Max/32 GB with the 120-capture orbit (startup excluded):
 
 | Configuration | Captures/sec |
 |---|---:|
@@ -181,6 +184,35 @@ substantially. This points to the grass geometry path rather than fragment
 shading/fill rate. These are controlled throughput comparisons, not GPU counters;
 they do not separate vertex shading, triangle setup, and tiling costs. All
 40.5 million blades are still submitted by default, including offscreen grass.
+
+### Temporal anti-aliasing experiment
+
+TAA is enabled by default, alongside 4× MSAA. **T** toggles it while walking;
+`--no-taa` starts with it disabled. A zero-mean eight-sample pattern jitters the
+scene projection by less than half a sensor pixel. The sky uses the matching ray
+offset. This preserves the camera's nominal projection, FOV and output dimensions.
+Only actual camera captures advance jitter and history; window redraws and preview
+zoom do not.
+
+Two RGBA16F history images hold display-encoded color and linear view depth. The
+resolve reconstructs the static scene position, reprojects it into the previous
+camera, rejects offscreen or depth-mismatched history, clamps history color to the
+current 3×3 neighborhood, and blends up to 90% history. Motion reduces history
+weight to 55%. Sky reprojection uses rotation only. The final RGBA8 camera image
+is written in the same fullscreen pass; the previous image is never sampled while
+being written.
+
+History is discarded on startup, TAA toggles, view reset, camera cuts (>2 m or
+roughly 20° between captures), exposure/gain changes, and clock jumps over two
+minutes. Normal camera movement uses reprojection. `--taa-smoke-test` exercises
+stationary accumulation, movement, a camera cut and an exposure change, checking
+that the three expected history resets occur. It does not prove visual quality.
+
+This is a basic TAA prototype for static grass and terrain: it adds no wind or
+object motion vectors, and temporal blending is not shutter integration. It can
+soften detail or leave trails. MSAA-averaged depth at mixed-coverage edges is only
+an approximation; subpixel grass can still lose history or shimmer. Rendering
+retains every requested blade, so TAA does not solve the geometry bottleneck.
 
 For a daylight walk, or the low camera view used for the visual comparison:
 

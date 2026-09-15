@@ -20,6 +20,14 @@ static struct {
     sg_pipeline preview_pipeline;
     sg_bindings preview_bindings;
     sg_attachments camera_attachments;
+    sg_pipeline taa_pipeline;
+    sg_attachments taa_attachments[2];
+    sg_bindings taa_bindings[2];
+    bool taa, history_valid;
+    unsigned history_index;
+    vs_params_t previous_capture;
+    double previous_utc, previous_exposure;
+    unsigned history_resets;
     float vertical_fov;
     yard_camera camera;
     double capture_elapsed;
@@ -45,7 +53,7 @@ static struct {
     int terrain_index_count;
     float eye_height;
     bool paused;
-    bool smoke_test, terrain_smoke_test;
+    bool smoke_test, terrain_smoke_test, taa_smoke_test;
     double smoke_elapsed;
 } state;
 
@@ -81,7 +89,7 @@ static void init(void) {
     sg_image camera_color = sg_make_image(&(sg_image_desc){
         .usage.color_attachment = true,
         .width = state.camera.profile.width, .height = state.camera.profile.height,
-        .pixel_format = SG_PIXELFORMAT_RGBA8, .sample_count = state.msaa,
+        .pixel_format = SG_PIXELFORMAT_RGBA16F, .sample_count = state.msaa,
         .label = "SVGA camera color",
     });
     sg_image camera_depth = sg_make_image(&(sg_image_desc){
@@ -99,7 +107,7 @@ static void init(void) {
         camera_output = sg_make_image(&(sg_image_desc){
             .usage.resolve_attachment = true,
             .width = state.camera.profile.width, .height = state.camera.profile.height,
-            .pixel_format = SG_PIXELFORMAT_RGBA8, .sample_count = 1,
+            .pixel_format = SG_PIXELFORMAT_RGBA16F, .sample_count = 1,
             .label = "resolved SVGA camera image",
         });
         state.camera_attachments.resolves[0] = sg_make_view(&(sg_view_desc){
@@ -112,9 +120,51 @@ static void init(void) {
         fprintf(stderr, "Cannot create %dx camera attachments.\n", state.msaa);
         exit(EXIT_FAILURE);
     }
+    sg_image camera_final = sg_make_image(&(sg_image_desc){
+        .usage.color_attachment = true,
+        .width = state.camera.profile.width, .height = state.camera.profile.height,
+        .pixel_format = SG_PIXELFORMAT_RGBA8, .sample_count = 1,
+        .label = "final RGBA8 camera image",
+    });
+    sg_view final_attachment = sg_make_view(&(sg_view_desc){.color_attachment.image = camera_final});
+    sg_view current_texture = sg_make_view(&(sg_view_desc){.texture.image = camera_output});
+    sg_view histories[2];
+    sg_sampler temporal_sampler = sg_make_sampler(&(sg_sampler_desc){
+        .min_filter = SG_FILTER_LINEAR, .mag_filter = SG_FILTER_LINEAR,
+        .wrap_u = SG_WRAP_CLAMP_TO_EDGE, .wrap_v = SG_WRAP_CLAMP_TO_EDGE,
+    });
+    for (int i=0; i<2; ++i) {
+        sg_image history = sg_make_image(&(sg_image_desc){
+            .usage.color_attachment = true,
+            .width = state.camera.profile.width, .height = state.camera.profile.height,
+            .pixel_format = SG_PIXELFORMAT_RGBA16F, .sample_count = 1,
+            .label = "TAA color and view depth history",
+        });
+        if (sg_query_image_state(history) != SG_RESOURCESTATE_VALID ||
+            sg_query_image_state(camera_final) != SG_RESOURCESTATE_VALID) {
+            fprintf(stderr, "Cannot allocate TAA history.\n"); exit(EXIT_FAILURE);
+        }
+        histories[i] = sg_make_view(&(sg_view_desc){.texture.image = history});
+        state.taa_attachments[i].colors[0] = sg_make_view(&(sg_view_desc){.color_attachment.image = history});
+        state.taa_attachments[i].colors[1] = final_attachment;
+    }
+    for (int i=0; i<2; ++i) state.taa_bindings[i] = (sg_bindings){
+        .vertex_buffers[0] = state.sky_bindings.vertex_buffers[0],
+        .views = {[VIEW_current_image] = current_texture, [VIEW_history_image] = histories[1-i]},
+        .samplers[SMP_temporal_sampler] = temporal_sampler,
+    };
+    state.taa_pipeline = sg_make_pipeline(&(sg_pipeline_desc){
+        .shader = sg_make_shader(taa_shader_desc(sg_query_backend())),
+        .layout.attrs[ATTR_taa_position].format = SG_VERTEXFORMAT_FLOAT2,
+        .depth = {.pixel_format = SG_PIXELFORMAT_NONE, .compare = SG_COMPAREFUNC_ALWAYS},
+        .color_count = 2,
+        .colors = {{.pixel_format = SG_PIXELFORMAT_RGBA16F},{.pixel_format = SG_PIXELFORMAT_RGBA8}},
+        .sample_count = 1,
+        .label = "TAA reprojection and final camera conversion",
+    });
     state.preview_bindings = (sg_bindings){
         .vertex_buffers[0] = state.sky_bindings.vertex_buffers[0],
-        .views[VIEW_camera_image] = sg_make_view(&(sg_view_desc){.texture.image = camera_output}),
+        .views[VIEW_camera_image] = sg_make_view(&(sg_view_desc){.texture.image = camera_final}),
         .samplers[SMP_camera_sampler] = sg_make_sampler(&(sg_sampler_desc){
             .min_filter = SG_FILTER_NEAREST, .mag_filter = SG_FILTER_NEAREST,
             .wrap_u = SG_WRAP_CLAMP_TO_EDGE, .wrap_v = SG_WRAP_CLAMP_TO_EDGE,
@@ -130,7 +180,7 @@ static void init(void) {
         .shader = sg_make_shader(sky_shader_desc(sg_query_backend())),
         .layout.attrs[ATTR_sky_position].format = SG_VERTEXFORMAT_FLOAT2,
         .depth = {.pixel_format = SG_PIXELFORMAT_DEPTH, .write_enabled = false, .compare = SG_COMPAREFUNC_ALWAYS},
-        .colors[0].pixel_format = SG_PIXELFORMAT_RGBA8,
+        .colors[0].pixel_format = SG_PIXELFORMAT_RGBA16F,
         .sample_count = state.msaa,
         .label = "atmosphere and ground",
     });
@@ -185,7 +235,7 @@ static void init(void) {
         },
         .cull_mode = SG_CULLMODE_NONE,
         .depth = {.pixel_format = SG_PIXELFORMAT_DEPTH, .write_enabled = true, .compare = SG_COMPAREFUNC_LESS_EQUAL},
-        .colors[0].pixel_format = SG_PIXELFORMAT_RGBA8,
+        .colors[0].pixel_format = SG_PIXELFORMAT_RGBA16F,
         .sample_count = state.msaa,
         .label = "two-sided grass triangles",
     });
@@ -205,7 +255,7 @@ static void init(void) {
         .cull_mode = SG_CULLMODE_BACK,
         .face_winding = SG_FACEWINDING_CCW,
         .depth = {.pixel_format = SG_PIXELFORMAT_DEPTH, .write_enabled = true, .compare = SG_COMPAREFUNC_LESS_EQUAL},
-        .colors[0].pixel_format = SG_PIXELFORMAT_RGBA8,
+        .colors[0].pixel_format = SG_PIXELFORMAT_RGBA16F,
         .sample_count = state.msaa,
         .label = "voxel terrain pipeline",
     });
@@ -246,6 +296,15 @@ static void frame(void) {
         state.track_moon = false;
         state.zoom = false;
     }
+    if (state.taa_smoke_test) {
+        yard_local_datetime("2026-09-14",9,&state.utc);
+        state.track_moon=false; state.zoom=false;
+        state.pitch=-0.3f;
+        state.yaw=state.captures>=64 ? 0.8f : 0;
+        state.position[0]=state.captures>=64 ? 12 : fmaxf(0,(float)state.captures-32)*0.015f;
+        state.position[2]=8;
+        yard_camera_set_lines(&state.camera,state.captures>=96 ? 404 : 202);
+    }
     state.position[1] = yard_terrain_height(&state.terrain, state.position[0], state.position[2]) + state.eye_height;
     yard_astronomy(state.utc, state.site.latitude, state.site.longitude, &state.ephemeris);
     if (state.track_moon) {
@@ -259,8 +318,8 @@ static void frame(void) {
         struct tm local;
         yard_local_calendar(state.utc, &local);
         strftime(date, sizeof(date), "%Y-%m-%d %H:%M %Z", &local);
-        snprintf(title, sizeof(title), "Yard | %dx%d %dx MSAA | Manual %.2f ms %.1fx (AEC %d, gain %d) | Lat %.5f, Lon %.5f | %s | Moon %.0f%% %s%s",
-                 state.camera.profile.width, state.camera.profile.height, state.msaa, yard_camera_exposure_ms(&state.camera),
+        snprintf(title, sizeof(title), "Yard | %dx%d %dx MSAA TAA %s | Manual %.2f ms %.1fx (AEC %d, gain %d) | Lat %.5f, Lon %.5f | %s | Moon %.0f%% %s%s",
+                 state.camera.profile.width, state.camera.profile.height, state.msaa, state.taa ? "on" : "off", yard_camera_exposure_ms(&state.camera),
                  yard_camera_gain(&state.camera), state.camera.exposure_lines, state.camera.gain_index,
                  state.site.latitude, state.site.longitude, date, state.ephemeris.illuminated*100, state.ephemeris.waxing ? "waxing" : "waning",
                  state.ephemeris.moon[1] < 0 ? " (below horizon)" : "");
@@ -270,11 +329,29 @@ static void frame(void) {
     if (sapp_width() <= 0 || sapp_height() <= 0) return;
     if (state.captures == 0 || state.capture_elapsed >= (1.0 / state.camera.profile.fps)) {
         state.capture_elapsed = fmod(state.capture_elapsed, (1.0 / state.camera.profile.fps));
+        // Eight stratified subpixel samples with zero mean, indexed by captures.
+        static const int jitter_x[8] = {-7,-5,-3,-1,1,3,5,7};
+        static const int jitter_y[8] = {-7,1,-3,5,-5,3,-1,7};
+        unsigned phase = state.captures%8;
         const vs_params_t uniforms = {
             .view = {state.yaw, state.pitch, (float)state.camera.profile.width / state.camera.profile.height, 0},
             .lens = {1.0f / tanf(state.vertical_fov * 0.00872664626f), (float)state.terrain.size, (float)state.grass_stride, 0},
             .camera_position = {state.position[0], state.position[1], state.position[2], 0},
+            .jitter = {state.taa ? jitter_x[phase]/(8.0f*state.camera.profile.width) : 0,
+                       state.taa ? jitter_y[phase]/(8.0f*state.camera.profile.height) : 0,0,0},
         };
+        double exposure = yard_camera_multiplier(&state.camera);
+        float displacement = 0;
+        for (int k=0; k<3; ++k) {
+            float d=uniforms.camera_position[k]-state.previous_capture.camera_position[k];
+            displacement += d*d;
+        }
+        // Camera cuts and discontinuous lighting/exposure changes discard history.
+        if (!state.taa || fabs(state.utc-state.previous_utc)>120 ||
+            fabs(exposure-state.previous_exposure)>1e-6 || displacement>4 ||
+            fabsf(remainderf(state.yaw-state.previous_capture.view[0],6.2831853f))>0.35f ||
+            fabsf(state.pitch-state.previous_capture.view[1])>0.35f) state.history_valid=false;
+        if (state.taa && !state.history_valid) ++state.history_resets;
         light_params_t light = {0};
         sunlight(state.ephemeris.sun, light.sun_color, 3.0);
         light.camera_exposure[0] = yard_camera_multiplier(&state.camera);
@@ -286,6 +363,7 @@ static void frame(void) {
         memcpy(sky.sky_camera_position, uniforms.camera_position, sizeof(sky.sky_camera_position));
         memcpy(sky.sky_lens, uniforms.lens, sizeof(sky.sky_lens));
         memcpy(sky.sky_view, uniforms.view, sizeof(sky.sky_view));
+        memcpy(sky.sky_jitter, uniforms.jitter, sizeof(sky.sky_jitter));
         memcpy(sky.sky_sun, light.sun_direction, sizeof(sky.sky_sun));
         memcpy(sky.sky_sun_color, light.sun_color, sizeof(sky.sky_sun_color));
         for (int i=0; i<3; ++i) {
@@ -318,6 +396,28 @@ static void frame(void) {
             sg_draw(0, 3, state.grass_count);
         }
         sg_end_pass();
+        taa_params_t temporal = {
+            .current_view = {state.yaw,state.pitch,uniforms.view[2],uniforms.lens[0]},
+            .previous_view = {state.previous_capture.view[0],state.previous_capture.view[1],
+                              state.previous_capture.view[2],state.previous_capture.lens[0]},
+            .temporal_jitter = {uniforms.jitter[0],uniforms.jitter[1],
+                                state.previous_capture.jitter[0],state.previous_capture.jitter[1]},
+            .temporal_settings = {1.0f/state.camera.profile.width,1.0f/state.camera.profile.height,
+                                  state.history_valid ? 1.0f : 0.0f,0.9f},
+        };
+        memcpy(temporal.current_position,uniforms.camera_position,sizeof(temporal.current_position));
+        memcpy(temporal.previous_position,state.previous_capture.camera_position,sizeof(temporal.previous_position));
+        sg_begin_pass(&(sg_pass){.attachments = state.taa_attachments[state.history_index]});
+        sg_apply_pipeline(state.taa_pipeline);
+        sg_apply_bindings(&state.taa_bindings[state.history_index]);
+        sg_apply_uniforms(UB_taa_params,&SG_RANGE(temporal));
+        sg_draw(0,3,1);
+        sg_end_pass();
+        state.previous_capture=uniforms;
+        state.previous_utc=state.utc;
+        state.previous_exposure=exposure;
+        state.history_valid=state.taa;
+        state.history_index=1-state.history_index;
         ++state.captures;
     }
     // Letterbox the fixed sensor image. Window size never changes its intrinsics.
@@ -338,10 +438,15 @@ static void frame(void) {
     sg_draw(0, 3, 1);
     sg_end_pass();
     sg_commit();
-    if (state.captures == 120 && (state.smoke_test || state.terrain_smoke_test)) {
+    if (state.captures == 120 && (state.smoke_test || state.terrain_smoke_test || state.taa_smoke_test)) {
         printf("Yard: rendered 120 %dx%d camera frames on Metal, %.1f fps cap, %.1f captures/s observed (%s).\n",
                state.camera.profile.width, state.camera.profile.height, state.camera.profile.fps, 119.0/state.smoke_elapsed,
-               state.terrain_smoke_test ? "terrain orbit" : "four lunar phases");
+               state.taa_smoke_test ? "TAA stationary, movement, cut, exposure" : state.terrain_smoke_test ? "terrain orbit" : "four lunar phases");
+        printf("Yard: TAA %s, %u history resets.\n",state.taa ? "on" : "off",state.history_resets);
+        if (state.taa_smoke_test && state.taa && state.history_resets != 3) {
+            fprintf(stderr,"TAA history reset regression: expected initial, cut, exposure.\n");
+            exit(EXIT_FAILURE);
+        }
         sapp_request_quit();
     }
 }
@@ -374,6 +479,11 @@ static void event(const sapp_event *ev) {
         yard_camera_step_gain(&state.camera, ev->key_code == SAPP_KEYCODE_EQUAL ? 1 : -1);
         state.title_minute = INT64_MIN;
     }
+    if (ev->key_code == SAPP_KEYCODE_T) {
+        state.taa = !state.taa;
+        state.history_valid = false;
+        state.title_minute = INT64_MIN;
+    }
     if (ev->key_code == SAPP_KEYCODE_M) state.track_moon = !state.track_moon;
     if (ev->key_code == SAPP_KEYCODE_Z) state.zoom = !state.zoom;
     if (ev->key_code == SAPP_KEYCODE_W || ev->key_code == SAPP_KEYCODE_A ||
@@ -395,6 +505,7 @@ static void event(const sapp_event *ev) {
         state.paused = true;
     }
     if (ev->key_code == SAPP_KEYCODE_R) {
+        state.history_valid = false;
         state.position[0] = 0;
         state.position[2] = 8;
         state.yaw = 0;
@@ -415,6 +526,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     tzset();
     state.site = yard_default_site;
     yard_camera_init(&state.camera, &yard_ov2640_svga);
+    state.taa = true;
     state.msaa = 4;
     state.grass_stride = 1;
     state.eye_height = 1.6f;
@@ -429,7 +541,9 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     double exposure_ms = -1, gain = -1, exposure_lines = -1, gain_index = -1;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--smoke-test") == 0) state.smoke_test = true;
+        else if (strcmp(argv[i], "--taa-smoke-test") == 0) state.taa_smoke_test = true;
         else if (strcmp(argv[i], "--terrain-smoke-test") == 0) state.terrain_smoke_test = true;
+        else if (strcmp(argv[i], "--no-taa") == 0) state.taa = false;
         else if (strcmp(argv[i], "--no-grass") == 0) state.no_grass = true;
         else if ((strcmp(argv[i], "--msaa") == 0 || strcmp(argv[i], "--grass-stride") == 0) && i+1 < argc) {
             bool msaa = strcmp(argv[i], "--msaa") == 0;
@@ -486,7 +600,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
                 requested_hour < 0 || requested_hour >= 24) goto usage;
         } else goto usage;
     }
-    if (state.smoke_test && state.terrain_smoke_test) goto usage;
+    if ((int)state.smoke_test+(int)state.terrain_smoke_test+(int)state.taa_smoke_test > 1) goto usage;
     if (profile_path) {
         yard_camera_profile profile;
         if (!yard_camera_profile_load(profile_path, &profile)) {
@@ -524,8 +638,8 @@ sapp_desc sokol_main(int argc, char *argv[]) {
         .logger.func = slog_func,
     };
 usage:
-    fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--eye-height metres] [--smoke-test | --terrain-smoke-test] [--site profile]\n"
-                    "Rendering: [--msaa 1|4] [--no-grass] [--grass-stride 1..64] (diagnostic density reduction)\n"
+    fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--eye-height metres] [--smoke-test | --terrain-smoke-test | --taa-smoke-test] [--site profile]\n"
+                    "Rendering: [--msaa 1|4] [--no-taa] (T toggles TAA) [--no-grass] [--grass-stride 1..64] (diagnostic density reduction)\n"
                     "Camera: [--camera-profile FILE] [--exposure-ms MS | --aec-value LINES] [--gain MULTIPLIER | --agc-gain INDEX]\n"
                     "OV2640 default: manual shutter 0-33.333333 ms (AEC 0-1200, frame-capped), gain 1-31x (index 0-30).\n"
                     "Keys: comma/period = shutter -/+ 1/3 stop; minus/equal = gain -/+ one step.\n"
