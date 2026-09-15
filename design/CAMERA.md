@@ -123,9 +123,10 @@ the sensor's nominal aspect and FOV; resizing, Retina and preview zoom cannot
 alter its intrinsics or the internal supersampling target dimensions.
 
 An area-weighted box filter integrates overlapping source pixels for each output
-pixel, handling fractional scale and image edges. Display-encoded scene RGB is
-decoded before averaging in linear light, then encoded to sRGB and converted to
-RGBA8. This is performed after the existing tone curve, so it is a rendering
+pixel, handling fractional scale and image edges. Scene RGB stays linear HDR
+through opaque rendering and the optional grass-volume composite. The downsample
+shader applies exposure and tone mapping per source sample, averages in linear
+display light, then encodes sRGB and converts to RGBA8. This is performed after the existing tone curve, so it is a rendering
 approximation rather than calibrated lens or photosite filtering.
 
 `--msaa 1|4` controls coverage sampling independently, defaulting to 1. When enabled,
@@ -135,3 +136,11 @@ control resolution and exposure timing independently of these renderer options.
 
 TAA, its projection jitter, and cross-frame history have been removed. Each
 captured image is instantaneous. No shutter integration or motion blur is added.
+
+
+The optional grass density LOD composites in linear scene light before exposure
+and tone mapping. RGBA16F alpha carries forward camera depth for clipping the ray
+march against opaque surfaces; it is not output opacity. The final camera image
+still has opaque alpha. With MSAA enabled, the resolved depth is an average at
+mixed-coverage edges, so the volume can approximate object intersections there.
+The default MSAA-off supersampled path uses one depth per internal sample.

@@ -153,6 +153,64 @@ Randomized roots break up the regular rows of the original cell-centered placeme
 full-acre moving-view check measured 17.1 captures/sec on M1 Max/32 GB, down from
 29.5 for bare terrain; the 30 fps cap is unchanged.
 
+### Cube baseline and optional grass volume LOD
+
+A light-gray **50 cm cube** sits at the yard center, with its base embedded 8 cm
+below the center's soil height. It uses the same sunlight/exposure and opaque depth
+testing as the terrain. It is visual geometry: it has no collision or cast shadow.
+
+Full triangle grass remains the default. **V** toggles the experimental shallow
+volume LOD without moving the camera; the title shows `blades` or `volume LOD`.
+`--grass-volume` enables it at startup. The existing **C** culling toggle still works.
+
+```sh
+./build/yard --date 2026-09-14 --time 9 --eye-height 0.4
+./build/yard --date 2026-09-14 --time 9 --eye-height 0.4 --grass-volume
+# Bring the volume close to inspect where it meets the cube:
+./build/yard --date 2026-09-14 --time 9 --eye-height 0.4 --grass-volume --lod-start 0.5 --lod-end 1
+```
+
+The default transition is **3–6 m horizontal distance** from the camera. Within
+that band, blade widths smoothly narrow as the volume contribution increases.
+Draw regions entirely beyond the band stop submitting blades; nearby intersecting
+regions can still submit degenerate distant blades. `--lod-start` and `--lod-end`
+accept finite distances from 0 to 100 m, with end strictly greater than start.
+This first experiment uses distance thresholds, not automatic projected-size LOD.
+
+The replacement is a **5 cm density layer above a bilinear 4 cm height field**,
+ray-marched at the internal rendering resolution. Extinction derives from 10,000
+roots/m², 5 mm blade base width, a triangular height profile, and an approximate
+uniform azimuth distribution. Beer–Lambert transmittance combines the layer with
+the scene; leaf lighting averages 16 azimuths weighted by projected area under
+the current sun and ambient illumination. `--grass-stride` scales volume density,
+and `--no-grass` suppresses both representations.
+
+The scene stores linear HDR RGB and forward camera depth in RGBA16F. The volume
+stops at the nearest rendered terrain, cube or blade surface, so solid objects
+block grass behind them and grass in front can partially cover their lower edges.
+Compositing precedes exposure/tone mapping. The volume has no single opaque depth
+surface and does not participate in collision, shadows, or transparent-object sorting.
+With 4× MSAA, resolved depth is averaged at mixed-coverage edges; volume occlusion
+there is approximate. Default 8× SSAA with MSAA off avoids that depth resolve.
+
+The height texture uses about 9.7 MiB and the additional 2263×1698 RGBA16F target
+about 29.3 MiB. These resources stay allocated for instant toggling. Persistent
+voxels, grass roots and the existing GPU blade data remain unchanged.
+
+**Limits:** this is a smooth statistical layer, not filtered captures of actual
+blade arrangements. It loses individual distant silhouettes and fine density
+variation. The height field approximates the original roots and render mesh;
+transition coverage/lighting matching is approximate. Empty-space skipping uses
+a conservative height-slope bound, followed by <=1 cm integration steps in the
+layer. Marches stop at 1,024 steps or 0.2% transmission, so unusually long grazing
+paths may under-integrate. There is no wind or grass/cube shadowing.
+
+The final 120-capture orbit at 40 cm eye height on M1 Max/32 GB with 8× SSAA
+measured **28.4 captures/sec for the cube + blades baseline** and **29.5 with volume
+LOD**. Average submitted blades fell from **9.13 million to 0.66 million**;
+terrain submission stayed at 1.25 million triangles. These are end-to-end rates
+with a **30 fps cap**, not uncapped GPU timings.
+
 ### Offscreen geometry culling
 
 Camera-frustum culling is enabled by default. **C** toggles it during a walk;
@@ -195,8 +253,9 @@ sensor's nominal aspect and FOV. Window resizing, Retina and preview zoom do not
 change either resolution.
 
 The area filter computes source-pixel overlap for each output pixel, including
-fractional footprints and image boundaries. It decodes sRGB before averaging and
-re-encodes afterward. Scene color remains RGBA16F until final conversion. The
+fractional footprints and image boundaries. Each source sample receives exposure/tone mapping, then is averaged in linear
+display light and encoded to sRGB. Scene radiance remains linear HDR RGBA16F
+through the optional grass volume composite. The
 scene is instantaneous: there is no jitter, frame history, or temporal blending.
 Filtering happens after tone mapping, so this is not a calibrated optical/sensor
 model. Small grass can still alias, although spatial sampling is denser.

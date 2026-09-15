@@ -25,6 +25,13 @@ static struct {
     sg_attachments downsample_attachments;
     sg_bindings downsample_bindings;
     int ssaa, render_width, render_height;
+    bool grass_volume;
+    float lod_start, lod_end;
+    sg_pipeline volume_pipeline;
+    sg_bindings volume_bindings;
+    sg_attachments volume_attachments;
+    sg_view scene_texture, volume_texture;
+    volume_params_t volume_params;
     float vertical_fov;
     yard_camera camera;
     double capture_elapsed;
@@ -112,6 +119,55 @@ static void make_test_cube(void) {
         .label="baseline cube"});
 }
 
+static void make_grass_volume(void) {
+    const int step=4, side=(state.terrain.size-1)/step+1;
+    size_t count=(size_t)side*side;
+    float *heights=malloc(count*sizeof(float));
+    if (!heights) { fprintf(stderr,"Cannot allocate volume height field.\n"); exit(EXIT_FAILURE); }
+    float low=1e6f,high=-1e6f,dx=0,dz=0;
+    for (int z=0; z<side; ++z) for (int x=0; x<side; ++x) {
+        float h=state.terrain.heights[z*step*state.terrain.size+x*step]*0.01f;
+        heights[z*side+x]=h;
+        low=fminf(low,h); high=fmaxf(high,h);
+        if (x) dx=fmaxf(dx,fabsf(h-heights[z*side+x-1])/0.04f);
+        if (z) dz=fmaxf(dz,fabsf(h-heights[(z-1)*side+x])/0.04f);
+    }
+    state.volume_params=(volume_params_t){
+        .volume_field={(0.5f-state.terrain.size*0.5f)*0.01f,0.04f,(float)side,hypotf(dx,dz)+0.0001f},
+        .volume_bounds={low,high+0.05f,state.terrain.size*0.005f,0},
+    };
+    sg_image field=sg_make_image(&(sg_image_desc){
+        .width=side,.height=side,.pixel_format=SG_PIXELFORMAT_R32F,
+        .data.mip_levels[0]={heights,count*sizeof(float)},.label="4 cm volume root height field"});
+    free(heights);
+    sg_image output=sg_make_image(&(sg_image_desc){
+        .width=state.render_width,.height=state.render_height,
+        .usage.color_attachment=true,.pixel_format=SG_PIXELFORMAT_RGBA16F,
+        .sample_count=1,.label="grass volume composite"});
+    state.volume_attachments.colors[0]=sg_make_view(&(sg_view_desc){.color_attachment.image=output});
+    state.volume_texture=sg_make_view(&(sg_view_desc){.texture.image=output});
+    sg_sampler sampler=state.downsample_bindings.samplers[SMP_source_sampler];
+    state.volume_bindings=(sg_bindings){
+        .vertex_buffers[0]=state.sky_bindings.vertex_buffers[0],
+        .views[VIEW_scene_image]=state.scene_texture,
+        .views[VIEW_height_image]=sg_make_view(&(sg_view_desc){.texture.image=field}),
+        .samplers[SMP_scene_sampler]=sampler,.samplers[SMP_height_sampler]=sampler,
+    };
+    state.volume_pipeline=sg_make_pipeline(&(sg_pipeline_desc){
+        .shader=sg_make_shader(volume_shader_desc(sg_query_backend())),
+        .layout.attrs[ATTR_volume_position].format=SG_VERTEXFORMAT_FLOAT2,
+        .depth={.pixel_format=SG_PIXELFORMAT_NONE,.compare=SG_COMPAREFUNC_ALWAYS},
+        .colors[0].pixel_format=SG_PIXELFORMAT_RGBA16F,.sample_count=1,
+        .label="shallow grass density volume"});
+    if (sg_query_image_state(field)!=SG_RESOURCESTATE_VALID ||
+        sg_query_image_state(output)!=SG_RESOURCESTATE_VALID ||
+        sg_query_pipeline_state(state.volume_pipeline)!=SG_RESOURCESTATE_VALID) {
+        fprintf(stderr,"Cannot create grass volume resources.\n"); exit(EXIT_FAILURE);
+    }
+    printf("Yard: grass volume %s, transition %.1f–%.1f m, %dx%d height field, slope bound %.3f\n",
+           state.grass_volume ? "on" : "off",state.lod_start,state.lod_end,side,side,state.volume_params.volume_field[3]);
+}
+
 static void init(void) {
     sg_setup(&(sg_desc){
         .environment = sglue_environment(),
@@ -174,6 +230,7 @@ static void init(void) {
     });
     sg_view final_attachment = sg_make_view(&(sg_view_desc){.color_attachment.image = camera_final});
     sg_view current_texture = sg_make_view(&(sg_view_desc){.texture.image = camera_output});
+    state.scene_texture=current_texture;
     if (sg_query_image_state(camera_final) != SG_RESOURCESTATE_VALID) {
         fprintf(stderr,"Cannot create final camera image.\n"); exit(EXIT_FAILURE);
     }
@@ -288,6 +345,7 @@ static void init(void) {
     }
     printf("Yard: %dx MSAA, %d blades before culling (stride %d)\n", state.msaa,state.grass_count,state.grass_stride);
     make_test_cube();
+    make_grass_volume();
     yard_mesh_destroy(&state.terrain.mesh);
     sg_shader shader = sg_make_shader(cube_shader_desc(sg_query_backend()));
     state.pipeline = sg_make_pipeline(&(sg_pipeline_desc){
@@ -354,8 +412,8 @@ static void frame(void) {
         struct tm local;
         yard_local_calendar(state.utc, &local);
         strftime(date, sizeof(date), "%Y-%m-%d %H:%M %Z", &local);
-        snprintf(title, sizeof(title), "Yard | %dx%d %dx SSAA %dx MSAA | Culling %s | Manual %.2f ms %.1fx (AEC %d, gain %d) | Lat %.5f, Lon %.5f | %s | Moon %.0f%% %s%s",
-                 state.camera.profile.width, state.camera.profile.height, state.ssaa, state.msaa, state.no_culling ? "off" : "on", yard_camera_exposure_ms(&state.camera),
+        snprintf(title, sizeof(title), "Yard | %dx%d %dx SSAA %dx MSAA | Culling %s | Grass %s | Manual %.2f ms %.1fx (AEC %d, gain %d) | Lat %.5f, Lon %.5f | %s | Moon %.0f%% %s%s",
+                 state.camera.profile.width, state.camera.profile.height, state.ssaa, state.msaa, state.no_culling ? "off" : "on", state.grass_volume ? "volume LOD" : "blades", yard_camera_exposure_ms(&state.camera),
                  yard_camera_gain(&state.camera), state.camera.exposure_lines, state.camera.gain_index,
                  state.site.latitude, state.site.longitude, date, state.ephemeris.illuminated*100, state.ephemeris.waxing ? "waxing" : "waning",
                  state.ephemeris.moon[1] < 0 ? " (below horizon)" : "");
@@ -369,6 +427,8 @@ static void frame(void) {
             .view = {state.yaw, state.pitch, (float)state.camera.profile.width / state.camera.profile.height, 0},
             .lens = {1.0f / tanf(state.vertical_fov * 0.00872664626f), (float)state.terrain.size, (float)state.grass_stride, 0},
             .camera_position = {state.position[0], state.position[1], state.position[2], 0},
+            .grass_lod = {state.grass_volume && !state.no_grass ? 1.0f : 0.0f,
+                          state.lod_start,state.lod_end,1.0f/state.grass_stride},
         };
         light_params_t light = {0};
         sunlight(state.ephemeris.sun, light.sun_color, 3.0);
@@ -429,6 +489,11 @@ static void frame(void) {
             for (int i=0; i<state.layout.count; ++i) {
                 const yard_draw_region *r=&state.layout.regions[i];
                 if (!state.no_culling && !yard_frustum_visible(&frustum,&r->grass)) continue;
+                if (state.grass_volume) {
+                    float dx=fmaxf(r->grass.min[0]-state.position[0],fmaxf(0,state.position[0]-r->grass.max[0]));
+                    float dz=fmaxf(r->grass.min[2]-state.position[2],fmaxf(0,state.position[2]-r->grass.max[2]));
+                    if (hypotf(dx,dz)>=state.lod_end) continue;
+                }
                 const grass_region_params_t region = {.grass_region = {
                     (float)r->x,(float)r->z,(float)r->width,0}};
                 state.grass_bindings.vertex_buffer_offsets[1]=r->root_start*(int)sizeof(float);
@@ -440,6 +505,23 @@ static void frame(void) {
             }
         }
         sg_end_pass();
+        state.downsample_bindings.views[VIEW_source_image]=state.scene_texture;
+        if (state.grass_volume && !state.no_grass) {
+            const volume_camera_params_t camera={
+                .volume_view={uniforms.view[0],uniforms.view[1],uniforms.view[2],0},
+                .volume_lens={uniforms.lens[0],uniforms.lens[1],uniforms.lens[2],0},
+                .volume_camera_position={state.position[0],state.position[1],state.position[2],0},
+                .volume_grass_lod={1,state.lod_start,state.lod_end,1.0f/state.grass_stride}};
+            sg_begin_pass(&(sg_pass){.attachments=state.volume_attachments});
+            sg_apply_pipeline(state.volume_pipeline);
+            sg_apply_bindings(&state.volume_bindings);
+            sg_apply_uniforms(UB_volume_camera_params,&SG_RANGE(camera));
+            sg_apply_uniforms(UB_volume_params,&SG_RANGE(state.volume_params));
+            sg_apply_uniforms(UB_light_params,&SG_RANGE(light));
+            sg_draw(0,3,1);
+            sg_end_pass();
+            state.downsample_bindings.views[VIEW_source_image]=state.volume_texture;
+        }
         const downsample_params_t filter = {.output_size = {
             (float)state.camera.profile.width,(float)state.camera.profile.height,0,0},
         };
@@ -447,6 +529,7 @@ static void frame(void) {
         sg_apply_pipeline(state.downsample_pipeline);
         sg_apply_bindings(&state.downsample_bindings);
         sg_apply_uniforms(UB_downsample_params,&SG_RANGE(filter));
+        sg_apply_uniforms(UB_light_params,&SG_RANGE(light));
         sg_draw(0,3,1);
         sg_end_pass();
         ++state.captures;
@@ -510,6 +593,11 @@ static void event(const sapp_event *ev) {
         yard_camera_step_gain(&state.camera, ev->key_code == SAPP_KEYCODE_EQUAL ? 1 : -1);
         state.title_minute = INT64_MIN;
     }
+    if (ev->key_code == SAPP_KEYCODE_V) {
+        state.grass_volume=!state.grass_volume;
+        state.title_minute=INT64_MIN;
+        printf("Yard: grass volume %s\n",state.grass_volume ? "on" : "off");
+    }
     if (ev->key_code == SAPP_KEYCODE_C) {
         state.no_culling = !state.no_culling;
         state.title_minute = INT64_MIN;
@@ -559,6 +647,8 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     state.ssaa = 8;
     state.msaa = 1;
     state.grass_stride = 1;
+    state.lod_start=3;
+    state.lod_end=6;
     state.eye_height = 1.6f;
     state.vertical_fov = 60.0f; // XIAO Sense OV2640 stock lens FOV is not yet calibrated.
     state.utc = (double)time(NULL);
@@ -572,6 +662,14 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--smoke-test") == 0) state.smoke_test = true;
         else if (strcmp(argv[i], "--terrain-smoke-test") == 0) state.terrain_smoke_test = true;
+        else if (strcmp(argv[i], "--grass-volume") == 0) state.grass_volume=true;
+        else if ((strcmp(argv[i],"--lod-start")==0 || strcmp(argv[i],"--lod-end")==0) && i+1<argc) {
+            bool start=strcmp(argv[i],"--lod-start")==0;
+            char *end; const char *value=argv[++i];
+            float distance=strtof(value,&end);
+            if (end==value || *end || !isfinite(distance) || distance<0 || distance>100) goto usage;
+            if (start) state.lod_start=distance; else state.lod_end=distance;
+        }
         else if (strcmp(argv[i], "--no-culling") == 0) state.no_culling = true;
         else if (strcmp(argv[i], "--no-grass") == 0) state.no_grass = true;
         else if ((strcmp(argv[i], "--msaa") == 0 || strcmp(argv[i], "--ssaa") == 0 || strcmp(argv[i], "--grass-stride") == 0) && i+1 < argc) {
@@ -664,6 +762,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
            state.camera.gain_index, yard_camera_multiplier(&state.camera));
     printf("Yard: skyglow atlas %d, lat %.7f lon %.7f, artificial/natural %.4f\n",
            state.site.year, state.site.latitude, state.site.longitude, state.site.artificial_ratio);
+    if (state.lod_end<=state.lod_start) goto usage;
     return (sapp_desc){
         .init_cb = init, .frame_cb = frame, .cleanup_cb = cleanup, .event_cb = event,
         .width = state.camera.profile.width, .height = state.camera.profile.height, .sample_count = 1, .high_dpi = true,
@@ -672,6 +771,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     };
 usage:
     fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--eye-height metres] [--smoke-test | --terrain-smoke-test] [--site profile]\n"
+                    "Grass LOD: [--grass-volume] [--lod-start metres] [--lod-end metres] (V toggles)\n"
                     "Rendering: [--ssaa 1|8] [--msaa 1|4] [--no-culling] [--no-grass] [--grass-stride 1..64] (diagnostic density reduction)\n"
                     "Camera: [--camera-profile FILE] [--exposure-ms MS | --aec-value LINES] [--gain MULTIPLIER | --agc-gain INDEX]\n"
                     "OV2640 default: manual shutter 0-33.333333 ms (AEC 0-1200, frame-capped), gain 1-31x (index 0-30).\n"
