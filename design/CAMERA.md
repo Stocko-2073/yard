@@ -113,30 +113,25 @@ The default OV2640 profile remains SVGA at up to 30 fps. Future profiles can
 specify different timings and nonuniform gain steps; sensor-specific nonlinear
 response and automatic metering will require extending the camera model.
 
-## Raster anti-aliasing
+## Spatial anti-aliasing
 
-`--msaa 4` (default) uses four coverage samples for scene rendering before a
-hardware resolve into the fixed camera image. `--msaa 1` disables it. Color,
-depth and scene pipelines use matching sample counts; the preview reads the
-single-sample resolved output. Window size, Retina and preview zoom still do not
-change output resolution or projection. MSAA is a rendering option separate from
-sensor timing profiles, not a model of the OV2640 lens or photosite response.
-The resolve averages display-encoded RGB and linear view depth in RGBA16F
-after exposure and tone mapping. Optional temporal accumulation follows, with
-final RGBA8 conversion. No shutter integration is added.
+The current experiment defaults to `--ssaa 8 --msaa 1`: approximately eight times
+the sensor pixel count, using `ceil(width × sqrt(8))` and `ceil(height × sqrt(8))`.
+The OV2640 profile therefore renders at 2263×1698 and produces the same fixed
+800×600 RGBA8 image. `--ssaa 1` uses native resolution. The projection always uses
+the sensor's nominal aspect and FOV; resizing, Retina and preview zoom cannot
+alter its intrinsics or the internal supersampling target dimensions.
 
-## Temporal anti-aliasing
+An area-weighted box filter integrates overlapping source pixels for each output
+pixel, handling fractional scale and image edges. Display-encoded scene RGB is
+decoded before averaging in linear light, then encoded to sRGB and converted to
+RGBA8. This is performed after the existing tone curve, so it is a rendering
+approximation rather than calibrated lens or photosite filtering.
 
-TAA defaults on; press T to toggle or use `--no-taa`. An eight-sample, zero-mean
-subpixel projection jitter advances only on camera captures. The current and
-previous capture poses and depth reproject static scene history; depth rejection
-and neighborhood clamping limit trails. Camera cuts, explicit view reset, TAA
-toggles, exposure changes and large time jumps invalidate history. MSAA can be
-controlled independently with `--msaa 1|4`.
+`--msaa 1|4` controls coverage sampling independently, defaulting to 1. When enabled,
+scene color/depth and all scene pipelines have matching multisample counts; a
+hardware resolve precedes spatial downsampling. Camera profiles continue to
+control resolution and exposure timing independently of these renderer options.
 
-Accumulation takes place in display-encoded floating-point color, then outputs
-the same fixed-resolution RGBA8 camera image. It is a visual filtering experiment,
-not calibrated sensor response or an exposure-time average. Cross-frame history
-can alter image features seen by a robot, including introducing softness and
-ghosting. Disable TAA for an instantaneous rendering comparison. No projection
-calibration, capture cadence, shutter/gain setting, or preview scaling changes.
+TAA, its projection jitter, and cross-frame history have been removed. Each
+captured image is instantaneous. No shutter integration or motion blur is added.

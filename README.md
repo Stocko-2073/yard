@@ -48,9 +48,11 @@ calibration will also account for lens distortion.
 
 This models resolution, aspect ratio, capture cadence, and manual shutter/gain
 response. Lens distortion, automatic exposure/gain, temporal shutter integration,
-rolling shutter, Bayer sampling, noise, and JPEG/RGB565 output are not simulated. The camera uses **4× MSAA plus TAA** by default and produces the same fixed
-RGBA8 image. Press **T** to toggle TAA, or launch with `--no-taa`.
-`--msaa 1 --no-taa` disables both anti-aliasing stages. Sun and moon retain their physical angular sizes.
+rolling shutter, Bayer sampling, noise, and JPEG/RGB565 output are not simulated.
+The camera defaults to **8× spatial supersampling** (about eight times the
+pixel count), downsampled into the same fixed RGBA8 image. `--ssaa 1` selects
+native-resolution rendering. `--msaa 1|4` controls MSAA independently; it defaults
+to 1 for the supersampling experiment. Sun and moon retain their physical angular sizes.
 
 The default location is **Thomaston, Georgia, USA**: 32.8908277° N, 84.3271342° W
 ([US Census city coordinates](https://tigerweb.geo.census.gov/tigerwebmain/Files/acs25/tigerweb_acs25_incplace_2025_bas25_ga.html)).
@@ -71,7 +73,6 @@ system's `America/New_York` timezone database, including daylight saving.
   collision handling. Set `--eye-height METRES` (0.1–10) for other viewpoints.
 - **M**: toggle moon tracking. A moon below the horizon remains hidden by ground;
   its status appears in the title. Step time forward to see it rise.
-- **T**: toggle temporal anti-aliasing and reset its history.
 - **Z**: toggle 8× digital preview magnification of the captured image; it does
   not change the camera projection or add image detail.
 - **1/2/3/4**: select 07:00/noon/19:00/midnight on the current local date and pause.
@@ -150,69 +151,57 @@ Cell-centered roots also reveal regular rows at some viewing angles. The initial
 full-acre moving-view check measured 17.1 captures/sec on M1 Max/32 GB, down from
 29.5 for bare terrain; the 30 fps cap is unchanged.
 
-### Anti-aliasing and rendering diagnostics
+### Spatial supersampling and rendering diagnostics
 
-`--msaa 4` (default) renders scene color and depth with four coverage samples per
-pixel, then resolves before temporal accumulation and final 800×600 RGBA8 conversion. `--msaa 1` selects
-single-sample rasterization; TAA is controlled separately. This improves triangle-edge coverage, including
-grass silhouettes; it does not add sensor pixels or change FOV. It cannot remove
-all subpixel grass shimmer, regular placement patterns, or temporal aliasing.
-The built-in resolve averages display-encoded RGB and view-depth alpha in
-RGBA16F. The final image is converted to RGBA8 after TAA. These are rendering
-approximations, not calibrated lens/sensor filtering.
+The default **`--ssaa 8 --msaa 1`** renders at **2263×1698** internally for an
+800×600 camera, then area-filters into the final fixed **800×600 RGBA8** image.
+8× refers to approximately eight times the pixel count, not eight times each
+dimension. Each dimension is `ceil(sensor_dimension × sqrt(8))`; integer rounding
+accounts for the small difference from exactly 8×. The projection keeps the
+sensor's nominal aspect and FOV. Window resizing, Retina and preview zoom do not
+change either resolution.
 
-For controlled comparisons, `--no-grass` skips the grass draw while keeping its
-data resident. `--grass-stride N` draws every Nth blade (1–64, default 1); root
-position and orientation remain those of the selected original voxel. This is
-a diagnostic density reduction, not spatial LOD or culling. The standard camera
-continues to cap captures at 30 fps, so faster configurations cannot report their
-uncapped throughput. Use the same `--terrain-smoke-test --eye-height 0.4` orbit
-when comparing runs; avoid other running Yard instances.
+The area filter computes source-pixel overlap for each output pixel, including
+fractional footprints and image boundaries. It decodes sRGB before averaging and
+re-encodes afterward. Scene color remains RGBA16F until final conversion. The
+scene is instantaneous: there is no jitter, frame history, or temporal blending.
+Filtering happens after tone mapping, so this is not a calibrated optical/sensor
+model. Small grass can still alias, although spatial sampling is denser.
 
-Measurements before TAA, on M1 Max/32 GB with the 120-capture orbit (startup excluded):
+For comparisons:
 
-| Configuration | Captures/sec |
-|---|---:|
-| 800×600, full grass, no MSAA (initial grass baseline) | 17.1 |
-| 400×300 diagnostic profile, full grass, no MSAA | 17.5 |
-| 800×600, full grass, 4× MSAA | 17.2 |
-| 800×600, every fourth blade, 4× MSAA | 29.0 |
-| 800×600, no grass draw, 4× MSAA | 29.6 |
+```sh
+./build/yard --terrain-smoke-test --eye-height 0.4 --ssaa 8 --msaa 1
+./build/yard --terrain-smoke-test --eye-height 0.4 --ssaa 1 --msaa 4
+./build/yard --terrain-smoke-test --eye-height 0.4 --ssaa 1 --msaa 1
+```
 
-The quarter-pixel test barely changes throughput, while fewer blades help
-substantially. This points to the grass geometry path rather than fragment
-shading/fill rate. These are controlled throughput comparisons, not GPU counters;
-they do not separate vertex shading, triangle setup, and tiling costs. All
-40.5 million blades are still submitted by default, including offscreen grass.
+`--ssaa 1` uses the native camera size. `--msaa 4` can independently add four
+coverage samples at the internal rendering resolution, with a hardware resolve
+before downsampling. The primary 8× SSAA comparison disables MSAA to isolate
+spatial supersampling. The removed TAA experiment's T key and CLI switches are
+no longer active.
 
-### Temporal anti-aliasing experiment
+`--no-grass` skips its draw while leaving data resident. `--grass-stride N` draws
+every Nth blade (1–64, default 1), retaining the selected original root and
+orientation. These are diagnostic density reductions, not automatic culling or
+LOD. Use the same orbit and avoid concurrent Yard instances for comparisons.
+The 30 fps capture cap remains, so fast configurations cannot report uncapped
+throughput. Startup/allocation time is excluded from the reported capture rate.
 
-TAA is enabled by default, alongside 4× MSAA. **T** toggles it while walking;
-`--no-taa` starts with it disabled. A zero-mean eight-sample pattern jitters the
-scene projection by less than half a sensor pixel. The sky uses the matching ray
-offset. This preserves the camera's nominal projection, FOV and output dimensions.
-Only actual camera captures advance jitter and history; window redraws and preview
-zoom do not.
+Full-density grass measurements on M1 Max/32 GB using the same 120-capture
+terrain orbit, excluding startup:
 
-Two RGBA16F history images hold display-encoded color and linear view depth. The
-resolve reconstructs the static scene position, reprojects it into the previous
-camera, rejects offscreen or depth-mismatched history, clamps history color to the
-current 3×3 neighborhood, and blends up to 90% history. Motion reduces history
-weight to 55%. Sky reprojection uses rotation only. The final RGBA8 camera image
-is written in the same fullscreen pass; the previous image is never sampled while
-being written.
+| Rendering | Internal size | Captures/sec |
+|---|---|---:|
+| Native, no AA | 800×600 | 17.3 |
+| Native, 4× MSAA | 800×600 | 17.2 |
+| 8× SSAA, no MSAA | 2263×1698 | 17.3 |
 
-History is discarded on startup, TAA toggles, view reset, camera cuts (>2 m or
-roughly 20° between captures), exposure/gain changes, and clock jumps over two
-minutes. Normal camera movement uses reprojection. `--taa-smoke-test` exercises
-stationary accumulation, movement, a camera cut and an exposure change, checking
-that the three expected history resets occur. It does not prove visual quality.
-
-This is a basic TAA prototype for static grass and terrain: it adds no wind or
-object motion vectors, and temporal blending is not shutter integration. It can
-soften detail or leave trails. MSAA-averaged depth at mixed-coverage edges is only
-an approximation; subpixel grass can still lose history or shimmer. Rendering
-retains every requested blade, so TAA does not solve the geometry bottleneck.
+These runs show no meaningful throughput difference. The result is consistent
+with the earlier geometry bottleneck: supersampling increases pixel work, while
+the submitted 40.5 million grass triangles remain unchanged. These are end-to-end
+capture rates, not GPU stage timings or a guarantee for other scenes.
 
 For a daylight walk, or the low camera view used for the visual comparison:
 

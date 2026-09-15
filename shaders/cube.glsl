@@ -85,7 +85,6 @@ layout(binding=0) uniform vs_params {
     vec4 view; // yaw, pitch, aspect, reserved
     vec4 lens; // projection scale, terrain column count, grass instance stride
     vec4 camera_position;
-    vec4 jitter; // current projection offset in NDC
 };
 @end
 
@@ -103,7 +102,6 @@ void main() {
     // Forward-positive camera coordinates; depth [0, 1].
     gl_Position = vec4(lens.x*p.x/view.z, lens.x*p.y,
                       (1000.0/999.9)*p.z - 100.0/999.9, p.z);
-    gl_Position.xy += jitter.xy*gl_Position.w;
     world_normal = normal;
 }
 @end
@@ -128,7 +126,7 @@ void main() {
     // #56341B is an sRGB albedo; convert to linear before lighting.
     vec3 albedo = pow((vec3(86,52,27)/255.0+0.055)/1.055, vec3(2.4));
     frag_color = vec4(display_color(surface_light(albedo, n, sun_direction.xyz,
-                                                sun_color.xyz, 1.0, night_radiance.xyz), camera_exposure.x), 1.0/gl_FragCoord.w);
+                                                sun_color.xyz, 1.0, night_radiance.xyz), camera_exposure.x), 1);
 }
 @end
 
@@ -145,7 +143,6 @@ void main() {
 @fs sky_fs
 layout(binding=2) uniform sky_params {
     vec4 sky_view;
-    vec4 sky_jitter;
     vec4 sky_sun;
     vec4 sky_sun_color;
     vec4 sky_night_radiance;
@@ -197,15 +194,13 @@ vec3 lunar_disk(vec3 ray) {
 }
 void main() {
     vec3 ray = normalize(camera_basis(sky_view.xy) *
-                        vec3((screen_position.x-sky_jitter.x)*sky_view.z, screen_position.y-sky_jitter.y, sky_lens.x));
+                        vec3(screen_position.x*sky_view.z, screen_position.y, sky_lens.x));
     vec3 sky = atmosphere(ray, sky_sun.xyz, sky_night_radiance.xyz);
     if (ray.y > 0.0) sky += lunar_disk(ray);
     vec3 result = sky;
-    float view_depth = 10000.0;
     if (ray.y < -0.0001) {
         float distance_to_ground = -sky_camera_position.y/ray.y;
         vec3 p = sky_camera_position.xyz + ray*distance_to_ground;
-        view_depth = min(9999.0, (transpose(camera_basis(sky_view.xy))*ray).z*distance_to_ground);
         // Subtle metre grid makes changing shadow length easy to judge.
         vec2 grid_dist = abs(fract(p.xz-0.5)-0.5);
         vec2 footprint = max(fwidth(p.xz), vec2(0.001));
@@ -217,7 +212,7 @@ void main() {
                                    1.0, sky_night_radiance.xyz);
         result = mix(ground, sky, 1.0-exp(-distance_to_ground*0.0015));
     }
-    frag_color = vec4(display_color(result, sky_camera_exposure.x), view_depth);
+    frag_color = vec4(display_color(result, sky_camera_exposure.x), 1);
 }
 @end
 
@@ -276,7 +271,6 @@ void main() {
     vec3 p = transpose(camera_basis(view.xy))*(world-camera_position.xyz);
     gl_Position = vec4(lens.x*p.x/view.z,lens.x*p.y,
                        (1000.0/999.9)*p.z-100.0/999.9,p.z);
-    gl_Position.xy += jitter.xy*gl_Position.w;
     grass_normal = vec3(-axis.y,0,axis.x);
 }
 @end
@@ -292,78 +286,48 @@ void main() {
     if (dot(n,sun_direction.xyz) < 0.0) n = -n;
     vec3 albedo = vec3(0.075,0.16,0.025);
     frag_color = vec4(display_color(surface_light(albedo,n,sun_direction.xyz,
-                        sun_color.xyz,1.0,night_radiance.xyz),camera_exposure.x),1.0/gl_FragCoord.w);
+                        sun_color.xyz,1.0,night_radiance.xyz),camera_exposure.x),1);
 }
 @end
 
 @program grass grass_vs grass_fs
 
-@fs taa_fs
-layout(binding=4) uniform taa_params {
-    vec4 current_view; // yaw, pitch, aspect, focal scale
-    vec4 previous_view;
-    vec4 current_position;
-    vec4 previous_position;
-    vec4 temporal_jitter; // current xy and previous zw, NDC
-    vec4 temporal_settings; // inverse width/height, valid history, history weight
+@fs downsample_fs
+layout(binding=4) uniform downsample_params {
+    vec4 output_size; // final sensor width and height
 };
-layout(binding=1) uniform texture2D current_image;
-layout(binding=2) uniform texture2D history_image;
-layout(binding=1) uniform sampler temporal_sampler;
-@include_block camera
+layout(binding=1) uniform texture2D source_image;
+layout(binding=1) uniform sampler source_sampler;
 in vec2 preview_uv;
-layout(location=0) out vec4 history_result;
-layout(location=1) out vec4 camera_result;
-vec2 uv_to_ndc(vec2 uv) {
-#ifndef SOKOL_GLSL
-    uv.y = 1.0-uv.y;
-#endif
-    return uv*2.0-1.0;
+out vec4 frag_color;
+vec3 decode_srgb(vec3 c) {
+    return mix(c/12.92,pow((c+0.055)/1.055,vec3(2.4)),step(vec3(0.04045),c));
 }
-vec2 ndc_to_uv(vec2 ndc) {
-    vec2 uv = ndc*0.5+0.5;
-#ifndef SOKOL_GLSL
-    uv.y = 1.0-uv.y;
-#endif
-    return uv;
+vec3 encode_srgb(vec3 c) {
+    return mix(c*12.92,1.055*pow(max(c,vec3(0)),vec3(1.0/2.4))-0.055,step(vec3(0.0031308),c));
 }
 void main() {
-    ivec2 dims = textureSize(sampler2D(current_image,temporal_sampler),0);
-    ivec2 pixel = clamp(ivec2(preview_uv*vec2(dims)),ivec2(0),dims-1);
-    vec4 current = texelFetch(sampler2D(current_image,temporal_sampler),pixel,0);
-    vec3 result = current.rgb;
-    if (temporal_settings.z > 0.5) {
-        vec2 ndc = uv_to_ndc(preview_uv)-temporal_jitter.xy;
-        vec3 local = vec3(ndc.x*current_view.z/current_view.w,ndc.y/current_view.w,1);
-        vec3 world = camera_basis(current_view.xy)*local*current.a;
-        bool sky = current.a >= 9999.5;
-        if (!sky) world += current_position.xyz-previous_position.xyz;
-        vec3 prev = transpose(camera_basis(previous_view.xy))*world;
-        vec2 previous_ndc = vec2(prev.x*previous_view.w/previous_view.z,prev.y*previous_view.w)/max(prev.z,0.001)+temporal_jitter.zw;
-        vec2 uv = ndc_to_uv(previous_ndc);
-        vec2 margin = temporal_settings.xy*0.5;
-        if (prev.z > 0 && all(greaterThanEqual(uv,margin)) && all(lessThanEqual(uv,vec2(1)-margin))) {
-            float depth = texelFetch(sampler2D(history_image,temporal_sampler),ivec2(uv*vec2(dims)),0).a;
-            bool matches = sky ? depth >= 9999.5 : abs(depth-prev.z) < max(0.025,prev.z*0.002);
-            if (matches) {
-                vec3 lo = current.rgb, hi = current.rgb;
-                for (int y=-1; y<=1; ++y) for (int x=-1; x<=1; ++x) {
-                    vec3 c = texelFetch(sampler2D(current_image,temporal_sampler),clamp(pixel+ivec2(x,y),ivec2(0),dims-1),0).rgb;
-                    lo = min(lo,c); hi = max(hi,c);
-                }
-                vec3 history = texture(sampler2D(history_image,temporal_sampler),uv).rgb;
-                history = clamp(history,lo,hi);
-                // Reduce persistence in moving views; jitter alone is not motion.
-                vec2 unjittered_previous = ndc_to_uv(previous_ndc-temporal_jitter.zw+temporal_jitter.xy);
-                float motion = length((unjittered_previous-preview_uv)/temporal_settings.xy);
-                float weight = mix(temporal_settings.w,0.55,smoothstep(0,8,motion));
-                result = mix(current.rgb,history,weight);
-            }
+    ivec2 dims = textureSize(sampler2D(source_image,source_sampler),0);
+    ivec2 pixel = clamp(ivec2(preview_uv*output_size.xy),ivec2(0),ivec2(output_size.xy)-1);
+    // Exact box overlap in source-pixel units; handles fractional sqrt(8) scale.
+    vec2 ratio = vec2(dims)/output_size.xy;
+    vec2 lo = vec2(pixel)*ratio, hi = vec2(pixel+1)*ratio;
+    ivec2 start = ivec2(floor(lo));
+    vec3 sum = vec3(0);
+    float weight_sum = 0;
+    // A <= sqrt(8)+rounding pixel footprint overlaps at most 4x4 source pixels.
+    for (int y=0; y<4; ++y) for (int x=0; x<4; ++x) {
+        ivec2 p = start+ivec2(x,y);
+        vec2 overlap = max(vec2(0),min(hi,vec2(p+1))-max(lo,vec2(p)));
+        float weight = overlap.x*overlap.y;
+        if (weight > 0) {
+            vec3 c = texelFetch(sampler2D(source_image,source_sampler),clamp(p,ivec2(0),dims-1),0).rgb;
+            sum += decode_srgb(c)*weight;
+            weight_sum += weight;
         }
     }
-    history_result = vec4(result,current.a);
-    camera_result = vec4(result,1);
+    frag_color = vec4(encode_srgb(sum/weight_sum),1);
 }
 @end
 
-@program taa preview_vs taa_fs
+@program downsample preview_vs downsample_fs
