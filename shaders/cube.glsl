@@ -83,7 +83,7 @@ vec3 surface_light(vec3 albedo, vec3 normal, vec3 sun, vec3 sunlight, float visi
 @block scene_view
 layout(binding=0) uniform vs_params {
     vec4 view; // yaw, pitch, aspect, reserved
-    vec4 lens; // projection scale, terrain column count
+    vec4 lens; // projection scale, terrain column count, grass instance stride
     vec4 camera_position;
 };
 @end
@@ -258,7 +258,7 @@ in float root_height;
 out vec3 grass_normal;
 void main() {
     int side = int(lens.y);
-    uint id = uint(gl_InstanceIndex);
+    uint id = uint(gl_InstanceIndex)*uint(lens.z);
     vec2 cell = vec2(int(id)%side, int(id)/side);
     // Integer hash produces deterministic azimuth without a per-blade buffer.
     uint h = id*747796405u+2891336453u;

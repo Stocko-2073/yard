@@ -112,3 +112,15 @@ Retina, and preview zoom still cannot change its resolution or projection.
 The default OV2640 profile remains SVGA at up to 30 fps. Future profiles can
 specify different timings and nonuniform gain steps; sensor-specific nonlinear
 response and automatic metering will require extending the camera model.
+
+## Raster anti-aliasing
+
+`--msaa 4` (default) uses four coverage samples for scene rendering before a
+hardware resolve into the fixed camera image. `--msaa 1` disables it. Color,
+depth and scene pipelines use matching sample counts; the preview reads the
+single-sample resolved output. Window size, Retina and preview zoom still do not
+change output resolution or projection. MSAA is a rendering option separate from
+sensor timing profiles, not a model of the OV2640 lens or photosite response.
+The current resolve averages display-encoded RGBA8 samples after exposure and
+tone mapping. Thin grass can still alias temporally; no temporal accumulation or
+shutter integration is added.

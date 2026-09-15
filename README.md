@@ -48,8 +48,8 @@ calibration will also account for lens distortion.
 
 This models resolution, aspect ratio, capture cadence, and manual shutter/gain
 response. Lens distortion, automatic exposure/gain, temporal shutter integration,
-rolling shutter, Bayer sampling, noise, and JPEG/RGB565 output are not simulated. The camera target is single-sample
-RGBA8, with no MSAA. Sun and moon retain their physical angular sizes.
+rolling shutter, Bayer sampling, noise, and JPEG/RGB565 output are not simulated. The camera renders with **4× MSAA** by default and resolves to the same fixed
+RGBA8 image. Use `--msaa 1` to disable anti-aliasing. Sun and moon retain their physical angular sizes.
 
 The default location is **Thomaston, Georgia, USA**: 32.8908277° N, 84.3271342° W
 ([US Census city coordinates](https://tigerweb.geo.census.gov/tigerwebmain/Files/acs25/tigerweb_acs25_incplace_2025_bas25_ga.html)).
@@ -143,10 +143,44 @@ One instanced draw reuses a single triangle. The existing navigation heights
 supply a 154.4 MiB immutable GPU root buffer; the vertex shader reconstructs X/Z
 and orientation from the instance ID. All blades are submitted each camera frame,
 with no density reduction, distance LOD, or CPU culling. Very distant blades are
-subpixel in the single-sample 800×600 camera and can shimmer during movement.
+subpixel in the 800×600 camera and can shimmer during movement.
 Cell-centered roots also reveal regular rows at some viewing angles. The initial
 full-acre moving-view check measured 17.1 captures/sec on M1 Max/32 GB, down from
 29.5 for bare terrain; the 30 fps cap is unchanged.
+
+### Anti-aliasing and rendering diagnostics
+
+`--msaa 4` (default) renders scene color and depth with four coverage samples per
+pixel, then resolves into the fixed 800×600 image for preview. `--msaa 1` retains
+the original single-sample path. This improves triangle-edge coverage, including
+grass silhouettes; it does not add sensor pixels or change FOV. It cannot remove
+all subpixel grass shimmer, regular placement patterns, or temporal aliasing.
+The built-in resolve averages the existing display-encoded RGBA8 samples; this
+is a rendering approximation, not calibrated lens/sensor filtering.
+
+For controlled comparisons, `--no-grass` skips the grass draw while keeping its
+data resident. `--grass-stride N` draws every Nth blade (1–64, default 1); root
+position and orientation remain those of the selected original voxel. This is
+a diagnostic density reduction, not spatial LOD or culling. The standard camera
+continues to cap captures at 30 fps, so faster configurations cannot report their
+uncapped throughput. Use the same `--terrain-smoke-test --eye-height 0.4` orbit
+when comparing runs; avoid other running Yard instances.
+
+Measured on the M1 Max/32 GB with the 120-capture orbit (startup excluded):
+
+| Configuration | Captures/sec |
+|---|---:|
+| 800×600, full grass, no MSAA (initial grass baseline) | 17.1 |
+| 400×300 diagnostic profile, full grass, no MSAA | 17.5 |
+| 800×600, full grass, 4× MSAA | 17.2 |
+| 800×600, every fourth blade, 4× MSAA | 29.0 |
+| 800×600, no grass draw, 4× MSAA | 29.6 |
+
+The quarter-pixel test barely changes throughput, while fewer blades help
+substantially. This points to the grass geometry path rather than fragment
+shading/fill rate. These are controlled throughput comparisons, not GPU counters;
+they do not separate vertex shading, triangle setup, and tiling costs. All
+40.5 million blades are still submitted by default, including offscreen grass.
 
 For a daylight walk, or the low camera view used for the visual comparison:
 
@@ -166,8 +200,8 @@ The surface spans the outer cell centers (63.60 m); the perimeter and bottom
 are uncapped. There are no caves in this seed, terrain self-shadows,
 or photorealistic materials. Classic marching cubes does not guarantee correct
 topology for arbitrary ambiguous density configurations; this prototype is a
-smooth height field. Camera resolution, FOV, manual exposure, single-sample
-800×600 rendering, and preview scaling retain their existing behavior.
+smooth height field. Camera resolution, FOV, manual exposure, 800×600 output, and preview scaling
+retain their existing behavior.
 
 `./build/yard --terrain-smoke-test --eye-height 0.4` renders 120 frames along a
 scripted daytime orbit and exits. It reports observed capture cadence excluding

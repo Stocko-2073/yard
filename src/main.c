@@ -28,6 +28,8 @@ static struct {
     sg_pipeline grass_pipeline;
     sg_bindings grass_bindings;
     int grass_count;
+    int grass_stride, msaa;
+    bool no_grass;
     sg_pipeline sky_pipeline;
     sg_bindings sky_bindings;
     double utc;
@@ -79,22 +81,40 @@ static void init(void) {
     sg_image camera_color = sg_make_image(&(sg_image_desc){
         .usage.color_attachment = true,
         .width = state.camera.profile.width, .height = state.camera.profile.height,
-        .pixel_format = SG_PIXELFORMAT_RGBA8, .sample_count = 1,
+        .pixel_format = SG_PIXELFORMAT_RGBA8, .sample_count = state.msaa,
         .label = "SVGA camera color",
     });
     sg_image camera_depth = sg_make_image(&(sg_image_desc){
         .usage.depth_stencil_attachment = true,
         .width = state.camera.profile.width, .height = state.camera.profile.height,
-        .pixel_format = SG_PIXELFORMAT_DEPTH, .sample_count = 1,
+        .pixel_format = SG_PIXELFORMAT_DEPTH, .sample_count = state.msaa,
         .label = "SVGA camera depth",
     });
     state.camera_attachments = (sg_attachments){
         .colors[0] = sg_make_view(&(sg_view_desc){.color_attachment.image = camera_color}),
         .depth_stencil = sg_make_view(&(sg_view_desc){.depth_stencil_attachment.image = camera_depth}),
     };
+    sg_image camera_output = camera_color;
+    if (state.msaa > 1) {
+        camera_output = sg_make_image(&(sg_image_desc){
+            .usage.resolve_attachment = true,
+            .width = state.camera.profile.width, .height = state.camera.profile.height,
+            .pixel_format = SG_PIXELFORMAT_RGBA8, .sample_count = 1,
+            .label = "resolved SVGA camera image",
+        });
+        state.camera_attachments.resolves[0] = sg_make_view(&(sg_view_desc){
+            .resolve_attachment.image = camera_output,
+        });
+    }
+    if (sg_query_image_state(camera_color) != SG_RESOURCESTATE_VALID ||
+        sg_query_image_state(camera_depth) != SG_RESOURCESTATE_VALID ||
+        sg_query_image_state(camera_output) != SG_RESOURCESTATE_VALID) {
+        fprintf(stderr, "Cannot create %dx camera attachments.\n", state.msaa);
+        exit(EXIT_FAILURE);
+    }
     state.preview_bindings = (sg_bindings){
         .vertex_buffers[0] = state.sky_bindings.vertex_buffers[0],
-        .views[VIEW_camera_image] = sg_make_view(&(sg_view_desc){.texture.image = camera_color}),
+        .views[VIEW_camera_image] = sg_make_view(&(sg_view_desc){.texture.image = camera_output}),
         .samplers[SMP_camera_sampler] = sg_make_sampler(&(sg_sampler_desc){
             .min_filter = SG_FILTER_NEAREST, .mag_filter = SG_FILTER_NEAREST,
             .wrap_u = SG_WRAP_CLAMP_TO_EDGE, .wrap_v = SG_WRAP_CLAMP_TO_EDGE,
@@ -111,7 +131,7 @@ static void init(void) {
         .layout.attrs[ATTR_sky_position].format = SG_VERTEXFORMAT_FLOAT2,
         .depth = {.pixel_format = SG_PIXELFORMAT_DEPTH, .write_enabled = false, .compare = SG_COMPAREFUNC_ALWAYS},
         .colors[0].pixel_format = SG_PIXELFORMAT_RGBA8,
-        .sample_count = 1,
+        .sample_count = state.msaa,
         .label = "atmosphere and ground",
     });
 
@@ -156,7 +176,8 @@ static void init(void) {
     state.grass_pipeline = sg_make_pipeline(&(sg_pipeline_desc){
         .shader = sg_make_shader(grass_shader_desc(sg_query_backend())),
         .layout = {
-            .buffers[1] = {.step_func = SG_VERTEXSTEP_PER_INSTANCE, .step_rate = 1},
+            .buffers[1] = {.stride = (int)sizeof(float)*state.grass_stride,
+                           .step_func = SG_VERTEXSTEP_PER_INSTANCE, .step_rate = 1},
             .attrs = {
                 [ATTR_grass_blade] = {.buffer_index = 0, .format = SG_VERTEXFORMAT_FLOAT2},
                 [ATTR_grass_root_height] = {.buffer_index = 1, .format = SG_VERTEXFORMAT_FLOAT},
@@ -165,11 +186,13 @@ static void init(void) {
         .cull_mode = SG_CULLMODE_NONE,
         .depth = {.pixel_format = SG_PIXELFORMAT_DEPTH, .write_enabled = true, .compare = SG_COMPAREFUNC_LESS_EQUAL},
         .colors[0].pixel_format = SG_PIXELFORMAT_RGBA8,
-        .sample_count = 1,
+        .sample_count = state.msaa,
         .label = "two-sided grass triangles",
     });
     printf("Yard: %d grass blades, 5 cm tall, 5 mm wide, %.1f MiB root buffer\n",
            state.grass_count, state.grass_count*sizeof(float)/1048576.0);
+    state.grass_count = state.no_grass ? 0 : (state.grass_count+state.grass_stride-1)/state.grass_stride;
+    printf("Yard: %dx MSAA, submitting %d blades (stride %d)\n", state.msaa,state.grass_count,state.grass_stride);
     yard_mesh_destroy(&state.terrain.mesh);
     sg_shader shader = sg_make_shader(cube_shader_desc(sg_query_backend()));
     state.pipeline = sg_make_pipeline(&(sg_pipeline_desc){
@@ -183,7 +206,7 @@ static void init(void) {
         .face_winding = SG_FACEWINDING_CCW,
         .depth = {.pixel_format = SG_PIXELFORMAT_DEPTH, .write_enabled = true, .compare = SG_COMPAREFUNC_LESS_EQUAL},
         .colors[0].pixel_format = SG_PIXELFORMAT_RGBA8,
-        .sample_count = 1,
+        .sample_count = state.msaa,
         .label = "voxel terrain pipeline",
     });
 }
@@ -236,8 +259,8 @@ static void frame(void) {
         struct tm local;
         yard_local_calendar(state.utc, &local);
         strftime(date, sizeof(date), "%Y-%m-%d %H:%M %Z", &local);
-        snprintf(title, sizeof(title), "Yard | %dx%d | Manual %.2f ms %.1fx (AEC %d, gain %d) | Lat %.5f, Lon %.5f | %s | Moon %.0f%% %s%s",
-                 state.camera.profile.width, state.camera.profile.height, yard_camera_exposure_ms(&state.camera),
+        snprintf(title, sizeof(title), "Yard | %dx%d %dx MSAA | Manual %.2f ms %.1fx (AEC %d, gain %d) | Lat %.5f, Lon %.5f | %s | Moon %.0f%% %s%s",
+                 state.camera.profile.width, state.camera.profile.height, state.msaa, yard_camera_exposure_ms(&state.camera),
                  yard_camera_gain(&state.camera), state.camera.exposure_lines, state.camera.gain_index,
                  state.site.latitude, state.site.longitude, date, state.ephemeris.illuminated*100, state.ephemeris.waxing ? "waxing" : "waning",
                  state.ephemeris.moon[1] < 0 ? " (below horizon)" : "");
@@ -249,7 +272,7 @@ static void frame(void) {
         state.capture_elapsed = fmod(state.capture_elapsed, (1.0 / state.camera.profile.fps));
         const vs_params_t uniforms = {
             .view = {state.yaw, state.pitch, (float)state.camera.profile.width / state.camera.profile.height, 0},
-            .lens = {1.0f / tanf(state.vertical_fov * 0.00872664626f), (float)state.terrain.size, 0, 0},
+            .lens = {1.0f / tanf(state.vertical_fov * 0.00872664626f), (float)state.terrain.size, (float)state.grass_stride, 0},
             .camera_position = {state.position[0], state.position[1], state.position[2], 0},
         };
         light_params_t light = {0};
@@ -287,11 +310,13 @@ static void frame(void) {
         sg_apply_uniforms(UB_vs_params, &SG_RANGE(uniforms));
         sg_apply_uniforms(UB_light_params, &SG_RANGE(light));
         sg_draw(0, state.terrain_index_count, 1);
-        sg_apply_pipeline(state.grass_pipeline);
-        sg_apply_bindings(&state.grass_bindings);
-        sg_apply_uniforms(UB_vs_params, &SG_RANGE(uniforms));
-        sg_apply_uniforms(UB_light_params, &SG_RANGE(light));
-        sg_draw(0, 3, state.grass_count);
+        if (state.grass_count > 0) {
+            sg_apply_pipeline(state.grass_pipeline);
+            sg_apply_bindings(&state.grass_bindings);
+            sg_apply_uniforms(UB_vs_params, &SG_RANGE(uniforms));
+            sg_apply_uniforms(UB_light_params, &SG_RANGE(light));
+            sg_draw(0, 3, state.grass_count);
+        }
         sg_end_pass();
         ++state.captures;
     }
@@ -390,6 +415,8 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     tzset();
     state.site = yard_default_site;
     yard_camera_init(&state.camera, &yard_ov2640_svga);
+    state.msaa = 4;
+    state.grass_stride = 1;
     state.eye_height = 1.6f;
     state.vertical_fov = 60.0f; // XIAO Sense OV2640 stock lens FOV is not yet calibrated.
     state.utc = (double)time(NULL);
@@ -403,6 +430,18 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--smoke-test") == 0) state.smoke_test = true;
         else if (strcmp(argv[i], "--terrain-smoke-test") == 0) state.terrain_smoke_test = true;
+        else if (strcmp(argv[i], "--no-grass") == 0) state.no_grass = true;
+        else if ((strcmp(argv[i], "--msaa") == 0 || strcmp(argv[i], "--grass-stride") == 0) && i+1 < argc) {
+            bool msaa = strcmp(argv[i], "--msaa") == 0;
+            const char *argument = argv[++i];
+            char *end;
+            long value = strtol(argument, &end, 10);
+            if (end == argument || *end != '\0' || value < 1 || value > 64) goto usage;
+            if (msaa) {
+                if (value != 1 && value != 4) goto usage;
+                state.msaa = (int)value;
+            } else state.grass_stride = (int)value;
+        }
         else if (strcmp(argv[i], "--moon") == 0) state.track_moon = true;
         else if (strcmp(argv[i], "--zoom") == 0) state.zoom = true;
         else if (strcmp(argv[i], "--camera-profile") == 0 && i+1 < argc) profile_path = argv[++i];
@@ -486,6 +525,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     };
 usage:
     fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--eye-height metres] [--smoke-test | --terrain-smoke-test] [--site profile]\n"
+                    "Rendering: [--msaa 1|4] [--no-grass] [--grass-stride 1..64] (diagnostic density reduction)\n"
                     "Camera: [--camera-profile FILE] [--exposure-ms MS | --aec-value LINES] [--gain MULTIPLIER | --agc-gain INDEX]\n"
                     "OV2640 default: manual shutter 0-33.333333 ms (AEC 0-1200, frame-capped), gain 1-31x (index 0-30).\n"
                     "Keys: comma/period = shutter -/+ 1/3 stop; minus/equal = gain -/+ one step.\n"
