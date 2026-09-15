@@ -115,11 +115,8 @@ in vec3 world_position;
 out vec4 frag_color;
 void main() {
     vec3 n = normalize(world_normal);
-    // Low-frequency turf patches stay continuous across merged voxel faces.
-    float variation = 0.5+0.25*sin(world_position.x*1.3+sin(world_position.z*0.7))
-                     +0.25*sin(world_position.z*2.1+world_position.x*0.4);
-    vec3 turf = mix(vec3(0.085,0.13,0.035), vec3(0.18,0.23,0.07), variation);
-    vec3 albedo = turf;
+    // Uniform green: visible brightness variation comes only from lighting.
+    vec3 albedo = vec3(0.13,0.18,0.05);
     frag_color = vec4(display_color(surface_light(albedo, n, sun_direction.xyz,
                                                 sun_color.xyz, 1.0, night_radiance.xyz), camera_exposure.x), 1);
 }

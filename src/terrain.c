@@ -2,25 +2,35 @@
 #include <math.h>
 #include <stdlib.h>
 
+/* Seeded value noise: non-tiling over the yard, with smooth transitions. */
+static float lattice(int x, int z) {
+    uint32_t h = (uint32_t)x*0x8da6b343u ^ (uint32_t)z*0xd8163841u ^ 0x71c3a52du;
+    h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15; h *= 0x846ca68bu; h ^= h >> 16;
+    return (h & 0xffffffu)*(2.0f/16777215.0f)-1.0f;
+}
+static float noise(float x, float z) {
+    int ix=(int)floorf(x), iz=(int)floorf(z);
+    float u=x-ix, v=z-iz;
+    u=u*u*u*(u*(u*6-15)+10);
+    v=v*v*v*(v*(v*6-15)+10);
+    float a=lattice(ix,iz), b=lattice(ix+1,iz), c=lattice(ix,iz+1), d=lattice(ix+1,iz+1);
+    return (a+(b-a)*u)*(1-v)+(c+(d-c)*u)*v;
+}
+
 bool yard_terrain_create(yard_terrain *t, int size) {
     *t = (yard_terrain){.size = size};
     if (size < 2 || size > YARD_TERRAIN_SIZE) return false;
     size_t columns = (size_t)size*size;
     t->voxels = malloc(columns*YARD_TERRAIN_DEPTH);
     t->heights = malloc(columns*sizeof(*t->heights));
-    float (*waves)[4] = malloc((size_t)size*sizeof(*waves));
-    if (!t->voxels || !t->heights || !waves) goto fail;
-    for (int i=0; i<size; ++i) {
-        float p = (i-size*0.5f)*0.01f;
-        waves[i][0] = sinf(p*0.43f);
-        waves[i][1] = sinf(p*1.17f+0.8f);
-        waves[i][2] = sinf(p*2.71f+1.7f);
-        waves[i][3] = sinf(p*5.13f+0.4f);
-    }
+    if (!t->voxels || !t->heights) goto fail;
     for (int z=0; z<size; ++z) for (int x=0; x<size; ++x) {
-        /* Same broad humps as the block prototype, without rounding height. */
-        float h = 19 + 6*waves[x][0]*waves[z][1] + 3*waves[x][1]*waves[z][0]
-                     + 1.5f*waves[x][2]*waves[z][2] + 0.5f*waves[x][3]*waves[z][3];
+        float wx=(x+0.5f-size*0.5f)*0.01f, wz=(z+0.5f-size*0.5f)*0.01f;
+        /* Bound is 4–60 cm inside the 64 cm slab. Independent offsets avoid
+         * aligning the three scales on the same lattice. */
+        float h = 32 + 20*noise(wx/4.0f+3.7f,wz/4.0f-1.3f)
+                     + 6*noise(wx/1.5f-9.2f,wz/1.5f+7.4f)
+                     + 2*noise(wx/0.55f+21.6f,wz/0.55f-13.8f);
         size_t column = (size_t)z*size+x;
         uint8_t *density = t->voxels+column*YARD_TERRAIN_DEPTH;
         for (int y=0; y<YARD_TERRAIN_DEPTH; ++y) {
@@ -37,7 +47,6 @@ bool yard_terrain_create(yard_terrain *t, int size) {
             }
         }
     }
-    free(waves); waves = NULL;
     if (!yard_marching_cubes(&t->mesh,t->voxels,size,YARD_TERRAIN_DEPTH,size,YARD_TERRAIN_MESH_STEP)) goto fail;
     for (size_t i=0; i<t->mesh.vertex_count; ++i) {
         float *p=t->mesh.vertices[i].position;
@@ -47,7 +56,7 @@ bool yard_terrain_create(yard_terrain *t, int size) {
     }
     return true;
 fail:
-    free(waves); yard_terrain_destroy(t); return false;
+    yard_terrain_destroy(t); return false;
 }
 
 float yard_terrain_height(const yard_terrain *t, float x, float z) {

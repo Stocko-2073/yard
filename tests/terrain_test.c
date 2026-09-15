@@ -92,7 +92,7 @@ static void terrain(int size) {
         assert(d[0] > 127 && d[YARD_TERRAIN_DEPTH-1] < 128);
         for (int y=1; y<YARD_TERRAIN_DEPTH; ++y) assert(d[y] <= d[y-1]);
         float h=t.heights[z*size+x];
-        assert(h>7 && h<31);
+        assert(h>3 && h<61);
         float wx=(x+0.5f-size*0.5f)*0.01f,wz=(z+0.5f-size*0.5f)*0.01f;
         assert(fabsf(yard_terrain_height(&t,wx,wz)-h*0.01f) < 1e-5f);
     }

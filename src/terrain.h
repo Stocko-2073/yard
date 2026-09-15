@@ -3,7 +3,7 @@
 #include "marching_cubes.h"
 
 #define YARD_TERRAIN_SIZE 6361 /* 63.61 m square, just under one acre. */
-#define YARD_TERRAIN_DEPTH 32
+#define YARD_TERRAIN_DEPTH 64
 #define YARD_TERRAIN_MESH_STEP 4 /* Uniform preview extraction spacing, in cm. */
 
 typedef struct {

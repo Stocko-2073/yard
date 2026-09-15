@@ -100,15 +100,17 @@ rendering execution, not visual correctness. `make clean` removes build output.
 ## Static marching-cubes yard prototype
 
 The yard occupies **63.61 × 63.61 m** (4,046.23 m², just under one acre), with
-**6,361 × 6,361 × 32 one-centimeter cells** and one byte per cell. The
-1,294,794,272-byte dense array remains resident. Each byte now represents density,
+**6,361 × 6,361 × 64 one-centimeter cells** and one byte per cell. The
+2,589,588,544-byte dense array remains resident. Each byte now represents density,
 with soil above 127.5 and air below it. Density is sampled at cell centers and
 encodes the vertical distance to the surface at 16 units/cm, clamped to 0–255.
 This retains sub-centimeter surface position within one byte; it is not a material
 ID or a Euclidean signed-distance field.
 
-The same deterministic broad humps and smaller irregularities put the surface
-roughly 8–30 cm above the fixed slab's y=0 base, without rounding heights to whole
+Seeded smooth value noise at 4 m, 1.5 m and 0.55 m scales produces irregular
+humps and dips, with heights bounded to 4–60 cm above the slab's y=0 base.
+The vertical volume is now 64 cm deep to allow greater relief than the original
+32 cm prototype; voxel spacing remains 1 cm. Heights are not rounded to whole
 centimeters. Classical **marching cubes** interpolates the 127.5 isosurface from
 the density array. The preview samples on a **uniform 4 cm extraction grid**
 (`YARD_TERRAIN_MESH_STEP`), with shortened final intervals at volume boundaries.
@@ -117,8 +119,11 @@ spacing. This is neither a full-resolution 1 cm mesh nor distance-based LOD.
 
 Adjacent cells share indexed vertices through a rolling edge cache. Normals
 come from the density gradient over the extraction spacing, interpolated across
-triangles for smooth lighting. All faces use the same green turf material. The
-mesh has 2,684,520 vertices and 5,362,482 triangles (122.8 MiB of GPU geometry)
+triangles for smooth lighting. All faces use one uniform green albedo. The repeating procedural color patches
+have been removed: brightness variation now comes from surface orientation under
+directional sunlight and ambient sky lighting. Terrain-cast shadows are not yet
+implemented. The
+mesh has 2,781,892 vertices and 5,557,104 triangles (127.3 MiB of GPU geometry)
 and is submitted in one draw; there is no chunking, editing, or physics.
 Temporary CPU mesh data is freed after upload. A roughly 154 MiB floating-point
 height cache remains for navigation. Startup generation and upload take several
