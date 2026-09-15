@@ -44,7 +44,7 @@ and sensor effects need separate investigation. The sky-only scene lacks a
 calibrated target or measured pose and is unsuitable for absolute brightness
 calibration.
 
-The first camera TODO remains open: this is a **partial twilight reference**.
+The full reference set remains future work: this is a **partial twilight reference**.
 Daylight, full-night, controlled-motion, and a repeatable target scene remain
 outstanding, as do hardware timing and render-brightness calibration. Outdoor
 transfers also took longer than the indoor checks; capture timestamps, rather

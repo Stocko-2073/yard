@@ -4,20 +4,38 @@
 
 Keep the original XIAO ESP32-S3 Sense **OV2640 at 800×600 SVGA** as the
 medium-term target. Preserve configurable camera profiles for other sensors.
-Manual shutter/gain controls and profiles are already implemented; the items
-below are future work. See [camera design and current limits](design/CAMERA.md).
+Manual shutter/gain controls and profiles are already implemented. Capture
+progress and future work are listed below. See
+[camera design and current limits](design/CAMERA.md).
 
-### Next
+### Completed
 
-- [ ] Capture a hardware reference set across daylight, twilight, and night,
-      with recorded exposure/gain, firmware revision, pixel format, and clock
-      settings. Include static scenes and controlled camera motion.
-      [Collection protocol and metadata template](design/CAMERA_REFERENCE.md) are
-      prepared. USB/Wi-Fi capture tooling and a 360-frame indoor bring-up sweep are
-      verified. An [outdoor twilight session](data/camera-reference/OUTDOOR_TWILIGHT.md)
-      adds 333 retained images, with acquisition failures and baseline drift noted.
-      Daylight, full-night, repeatable target scenes, and controlled motion remain
-      outstanding.
+- [x] Add USB and authenticated Wi-Fi capture firmware, serial network setup,
+      and a collector that retains original SVGA images, metadata, and firmware
+      provenance. Verify indoor acquisition, Wi-Fi reconnection, and initial
+      outdoor capture. See the [collection protocol](design/CAMERA_REFERENCE.md),
+      [indoor bring-up](data/camera-reference/INDOOR_BRINGUP.md),
+      [Wi-Fi checks](data/camera-reference/WIFI_BRINGUP.md), and
+      [partial twilight session](data/camera-reference/OUTDOOR_TWILIGHT.md).
+
+### Next — future work
+
+- [ ] Add selectable hardware white-balance correction and record its settings.
+      Compare automatic/settled correction with the current disabled configuration
+      before judging camera color quality. Define a repeatable way to retain
+      corrected color settings for reference captures.
+- [ ] Investigate outdoor AEC 672 acquisition failures and baseline brightness
+      drift at identical register settings. Check sensor timing, settling,
+      processing, power, and transport separately before assigning a cause.
+- [ ] Complete the hardware reference set across daylight, twilight, and full
+      night, including a repeatable target scene and controlled camera motion.
+      Record exposure/gain, firmware revision, pixel format, clock settings,
+      weather, and nearby lights. Initial indoor and twilight captures are
+      retained, but are not an absolute brightness calibration dataset.
+- [ ] Compare the original and replacement wide-lens OV2640 modules under matched
+      lighting, framing, exposure, and color settings. Keep module/lens identity
+      separate in metadata. Use an opaque lens cap for dark-frame measurements;
+      hand-covered images cannot distinguish leakage from transmitted light.
 - [ ] Verify SVGA line timing and the exposure/frame-period relationship on the
       actual module. Replace inferred profile timings with measured values.
 - [ ] Calibrate render brightness against the reference captures across shutter
