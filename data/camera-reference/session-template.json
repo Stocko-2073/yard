@@ -1,0 +1,82 @@
+{
+  "status": "template-not-a-capture",
+  "session_id": null,
+  "utc_start": null,
+  "utc_end": null,
+  "hardware": {"board": null, "sensor": null, "lens": null, "unit_id": null},
+  "firmware": {
+    "source_url": null,
+    "revision": null,
+    "local_changes_file": null,
+    "driver_revision": null,
+    "build_config_file": null,
+    "build_and_capture_instructions_file": null
+  },
+  "scene": {
+    "latitude_deg": null,
+    "longitude_deg": null,
+    "lighting_condition": null,
+    "weather_and_lamps": null,
+    "setup_file": null,
+    "target_distance_m": null,
+    "camera_height_m": null
+  },
+  "output": {
+    "width": 800,
+    "height": 600,
+    "pixel_format": null,
+    "jpeg_quality": null,
+    "raw_byte_order": null,
+    "raw_row_stride_bytes": null,
+    "raw_packing": null
+  },
+  "clock": {
+    "configured_xclk_hz": null,
+    "register_dump_file": null,
+    "readback_method": null,
+    "measured_line_period_us": null,
+    "measurement_method": null
+  },
+  "timestamps": {
+    "event": null,
+    "clock_origin": null,
+    "units": null,
+    "utc_sync_uncertainty_ms": null
+  },
+  "runs": [
+    {
+      "run_id": null,
+      "series": null,
+      "utc_start": null,
+      "utc_end": null,
+      "requested": {"aec_value": null, "agc_gain_index": null},
+      "readback": {
+        "aec_value": null,
+        "agc_gain_index": null,
+        "automatic_exposure": null,
+        "secondary_exposure_control": null,
+        "automatic_gain": null
+      },
+      "processing_settings_file": null,
+      "settings_log_file": null,
+      "discarded_frames_after_setting_change": null,
+      "settling_criterion": null,
+      "motion": {
+        "kind": null,
+        "axis_and_direction": null,
+        "distance_m": null,
+        "angle_deg": null,
+        "duration_s": null,
+        "measurement_method": null,
+        "trajectory_file": null
+      },
+      "dropped_frames": null,
+      "capture_failures": null,
+      "frames": [
+        {"file": null, "sha256": null, "bytes": null, "sequence": null, "timestamp": null}
+      ],
+      "notes": null
+    }
+  ],
+  "notes": null
+}
