@@ -135,9 +135,11 @@ seconds.
 ### Grass experiment
 
 Each surface voxel column carries **one upright triangle, 5 cm tall and 5 mm
-wide**, for **40,462,321 blades** over the acre. Roots sit at the centimeter cell
-centers on the density-derived surface (the coarser render mesh approximates
-that surface). A stable hash selects each blade's azimuth. The blades are green
+wide**, for **40,462,321 blades** over the acre. Roots are randomly placed within
+each centimeter cell's horizontal footprint (up to ±5 mm from its center in X/Z).
+Placement is deterministic, with an independent stable hash selecting azimuth.
+Root height still uses the cell-center density-derived surface height; both this
+and the coarser render mesh approximate the surface at the offset position. The blades are green
 and two-sided, with no wind, textures, alpha blending, or crossed billboards.
 Both sides receive sunlight in this simple thin-leaf shading model; grass does
 not cast shadows on the soil or other blades yet.
@@ -147,7 +149,7 @@ supply a 154.4 MiB immutable GPU root buffer; the vertex shader reconstructs X/Z
 and orientation from the instance ID. All blades are submitted each camera frame,
 with no density reduction, distance LOD, or CPU culling. Very distant blades are
 subpixel in the 800×600 camera and can shimmer during movement.
-Cell-centered roots also reveal regular rows at some viewing angles. The initial
+Randomized roots break up the regular rows of the original cell-centered placement. The initial
 full-acre moving-view check measured 17.1 captures/sec on M1 Max/32 GB, down from
 29.5 for bare terrain; the 30 fps cap is unchanged.
 

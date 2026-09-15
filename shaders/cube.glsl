@@ -256,17 +256,22 @@ void main() {
 in vec2 blade;
 in float root_height;
 out vec3 grass_normal;
+uint grass_hash(uint seed) {
+    uint h = seed*747796405u+2891336453u;
+    h = ((h >> ((h >> 28u)+4u)) ^ h)*277803737u;
+    return (h >> 22u) ^ h;
+}
 void main() {
     int side = int(lens.y);
     uint id = uint(gl_InstanceIndex)*uint(lens.z);
     vec2 cell = vec2(int(id)%side, int(id)/side);
-    // Integer hash produces deterministic azimuth without a per-blade buffer.
-    uint h = id*747796405u+2891336453u;
-    h = ((h >> ((h >> 28u)+4u)) ^ h)*277803737u;
-    h = (h >> 22u) ^ h;
+    // Separate hashes keep placement stable and independent of azimuth.
+    uint h = grass_hash(id);
     vec2 axis = normalize(vec2(float(h & 65535u),float(h >> 16u))-vec2(32767.5));
-    vec3 root = vec3((cell.x+0.5-lens.y*0.5)*0.01, root_height*0.01,
-                     (cell.y+0.5-lens.y*0.5)*0.01);
+    uint placement = grass_hash(id ^ 0x9e3779b9u);
+    vec2 offset = (vec2(float(placement & 65535u),float(placement >> 16u))+0.5)/65536.0;
+    vec3 root = vec3((cell.x+offset.x-lens.y*0.5)*0.01, root_height*0.01,
+                     (cell.y+offset.y-lens.y*0.5)*0.01);
     vec3 world = root+vec3(axis.x*blade.x,blade.y,axis.y*blade.x);
     vec3 p = transpose(camera_basis(view.xy))*(world-camera_position.xyz);
     gl_Position = vec4(lens.x*p.x/view.z,lens.x*p.y,
