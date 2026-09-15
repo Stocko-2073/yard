@@ -14,7 +14,7 @@ all: build/yard
 build:
 	mkdir -p build
 
-build/main.o: src/main.c src/astronomy.h src/skyglow.h src/camera.h src/terrain.h $(HEADERS) $(SHADER_HEADER) | build
+build/main.o: src/main.c src/astronomy.h src/skyglow.h src/camera.h src/terrain.h src/marching_cubes.h $(HEADERS) $(SHADER_HEADER) | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 build/sokol.o: src/sokol.m $(HEADERS) | build
@@ -29,10 +29,13 @@ build/skyglow.o: src/skyglow.c src/skyglow.h src/astronomy.h | build
 build/camera.o: src/camera.c src/camera.h | build
 	$(CC) $(CFLAGS) -c $< -o $@
 
-build/terrain.o: src/terrain.c src/terrain.h | build
+build/marching_cubes.o: src/marching_cubes.c src/marching_cubes.h vendor/marching_cubes/tables.h | build
 	$(CC) $(CFLAGS) -O2 -c $< -o $@
 
-build/yard: build/main.o build/sokol.o build/astronomy.o build/skyglow.o build/camera.o build/terrain.o
+build/terrain.o: src/terrain.c src/terrain.h src/marching_cubes.h | build
+	$(CC) $(CFLAGS) -O2 -c $< -o $@
+
+build/yard: build/main.o build/sokol.o build/astronomy.o build/skyglow.o build/camera.o build/terrain.o build/marching_cubes.o
 	$(CC) $^ $(FRAMEWORKS) -o $@
 
 run: build/yard
@@ -50,8 +53,8 @@ build/skyglow-test: tests/skyglow_test.c src/skyglow.c src/skyglow.h src/astrono
 build/camera-test: tests/camera_test.c src/camera.c src/camera.h | build
 	$(CC) $(CFLAGS) -Isrc tests/camera_test.c src/camera.c -o $@
 
-build/terrain-test: tests/terrain_test.c src/terrain.c src/terrain.h | build
-	$(CC) $(CFLAGS) -O2 -Isrc tests/terrain_test.c src/terrain.c -o $@
+build/terrain-test: tests/terrain_test.c src/terrain.c src/terrain.h src/marching_cubes.c src/marching_cubes.h vendor/marching_cubes/tables.h | build
+	$(CC) $(CFLAGS) -O2 -Isrc tests/terrain_test.c src/terrain.c src/marching_cubes.c -o $@
 
 test: build/astronomy-test build/skyglow-test build/camera-test build/terrain-test
 	./build/terrain-test

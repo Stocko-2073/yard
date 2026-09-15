@@ -97,24 +97,34 @@ a published position example, and calendar/DST boundaries, without a GUI.
 moon dates on Metal, then exits; it requires a graphical macOS session and checks
 rendering execution, not visual correctness. `make clean` removes build output.
 
-## Static voxel yard prototype
+## Static marching-cubes yard prototype
 
-The yard is **63.61 × 63.61 m** (4,046.23 m², just under one acre), represented
-by **6,361 × 6,361 × 32 one-centimeter cells**, with one byte per cell. The
-1,294,794,272-byte dense array remains resident: 0 means air and 1 means soil.
-The fixed slab runs from y=0 to y=0.32 m; gentle deterministic humps put the
-surface roughly 8–30 cm above its base. This is a filled height field inside a
-voxel volume, with no caves, editing, physics, chunking, or LOD yet.
+The yard occupies **63.61 × 63.61 m** (4,046.23 m², just under one acre), with
+**6,361 × 6,361 × 32 one-centimeter cells** and one byte per cell. The
+1,294,794,272-byte dense array remains resident. Each byte now represents density,
+with soil above 127.5 and air below it. Density is sampled at cell centers and
+encodes the vertical distance to the surface at 16 units/cm, clamped to 0–255.
+This retains sub-centimeter surface position within one byte; it is not a material
+ID or a Euclidean signed-distance field.
 
-At startup, a height cache drives greedy top rectangles and merged exposed
-vertical risers. The mesh preserves the exact centimeter staircase, with green
-tops and green risers; it does not smooth the surface. The buried bottom is
-omitted. All terrain is submitted in one indexed draw. This seed generates
-2,339,035 quads / 4,678,070 triangles, about 268 MiB of GPU geometry. Temporary
-CPU geometry is freed after upload; the roughly 39 MiB height cache remains for
-navigation. Initial generation/upload can take a few seconds.
+The same deterministic broad humps and smaller irregularities put the surface
+roughly 8–30 cm above the fixed slab's y=0 base, without rounding heights to whole
+centimeters. Classical **marching cubes** interpolates the 127.5 isosurface from
+the density array. The preview samples on a **uniform 4 cm extraction grid**
+(`YARD_TERRAIN_MESH_STEP`), with shortened final intervals at volume boundaries.
+This keeps the whole-acre mesh manageable; the source volume still has 1 cm
+spacing. This is neither a full-resolution 1 cm mesh nor distance-based LOD.
 
-For a daylight walk, or a low camera view where the steps are easier to inspect:
+Adjacent cells share indexed vertices through a rolling edge cache. Normals
+come from the density gradient over the extraction spacing, interpolated across
+triangles for smooth lighting. All faces use the same green turf material. The
+mesh has 2,684,520 vertices and 5,362,482 triangles (122.8 MiB of GPU geometry)
+and is submitted in one draw; there is no chunking, editing, or physics.
+Temporary CPU mesh data is freed after upload. A roughly 154 MiB floating-point
+height cache remains for navigation. Startup generation and upload take several
+seconds.
+
+For a daylight walk, or the low camera view used for the visual comparison:
 
 ```sh
 ./build/yard --date 2026-09-14 --time 9
@@ -123,19 +133,26 @@ For a daylight walk, or a low camera view where the steps are easier to inspect:
 
 Click to capture the mouse, use WASD to walk, Shift to move faster, and Escape
 to release. The clock starts paused when `--time` is supplied. The viewer follows
-the nearest voxel column, so movement retains 1 cm vertical steps. Outside the
-square, it follows the y=0 ground plane. This is a look prototype: simple turf
-color patches across tops and risers, and directional lighting, without grass
-blades, filtered voxel edges, terrain shadows, or photorealistic materials.
-Camera resolution, FOV, manual exposure, and preview scaling retain their existing
-behavior. In particular, 800×600 without MSAA makes distant steps visibly alias.
+bilinearly interpolated heights recovered from the density field, without the
+previous 1 cm vertical jumps. The 4 cm render mesh approximates that field, so
+navigation is not an exact triangle collision query. Outside the square, the
+viewer follows the y=0 ground plane.
+
+The surface spans the outer cell centers (63.60 m); the perimeter and bottom
+are uncapped. There are no caves in this seed, terrain self-shadows, grass blades,
+or photorealistic materials. Classic marching cubes does not guarantee correct
+topology for arbitrary ambiguous density configurations; this prototype is a
+smooth height field. Camera resolution, FOV, manual exposure, single-sample
+800×600 rendering, and preview scaling retain their existing behavior.
 
 `./build/yard --terrain-smoke-test --eye-height 0.4` renders 120 frames along a
 scripted daytime orbit and exits. It reports observed capture cadence excluding
 startup; this is an execution/cadence check, not a GPU timing benchmark or a test
 of physical mouse/keyboard input. `make smoke-test` retains the lunar-phase check.
-`make test` also checks voxel occupancy, surface area, mesh winding and indices,
-and navigation height queries on smaller terrain fixtures.
+`make test` covers interpolated plane accuracy and coverage, closed sphere edge
+connectivity, outward winding, normals, indices, density and navigation heights.
+The lookup tables are vendored from [PyMCubes](vendor/marching_cubes/README.md)
+under its accompanying BSD license; normal builds remain offline.
 
 ## Camera exposure
 
@@ -215,7 +232,8 @@ samples with eight sun samples each per fragment; a cached sky lookup texture
 is a possible optimization as the yard grows.
 
 - `src/main.c`: application lifecycle, rendering, and input.
-- `src/terrain.c`: dense centimeter voxels, static surface meshing, and height queries.
+- `src/terrain.c`: dense centimeter density generation and height queries.
+- `src/marching_cubes.c`: interpolated surface extraction, shared vertices and gradient normals.
 - `src/astronomy.c`: sun/moon ephemeris and local calendar conversion.
 - `src/skyglow.c`: offline site profiles and location-dependent night lighting.
 - `src/camera.c`: camera profiles, manual exposure, and gain response.

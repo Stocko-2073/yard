@@ -37,6 +37,7 @@ static struct {
     int64_t title_minute;
     sg_bindings bindings;
     yard_terrain terrain;
+    int terrain_index_count;
     float eye_height;
     bool paused;
     bool smoke_test, terrain_smoke_test;
@@ -115,17 +116,19 @@ static void init(void) {
         fprintf(stderr, "Cannot allocate terrain or build its mesh.\n");
         exit(EXIT_FAILURE);
     }
-    printf("Yard: %.2f m square, %zu voxel bytes, %zu quads (%zu triangles), %.1f MiB mesh\n",
-           state.terrain.size*0.01, (size_t)state.terrain.size*state.terrain.size*YARD_TERRAIN_DEPTH,
-           state.terrain.quads, state.terrain.quads*2,
-           state.terrain.quads*(4*sizeof(yard_terrain_vertex)+6*sizeof(uint32_t))/1048576.0);
+    printf("Yard: marching cubes, %d cm mesh spacing, %.2f m square, %zu density bytes, %zu vertices, %zu triangles, %.1f MiB mesh\n",
+           YARD_TERRAIN_MESH_STEP, state.terrain.size*0.01,
+           (size_t)state.terrain.size*state.terrain.size*YARD_TERRAIN_DEPTH,
+           state.terrain.mesh.vertex_count, state.terrain.mesh.index_count/3,
+           (state.terrain.mesh.vertex_count*sizeof(yard_mesh_vertex)+state.terrain.mesh.index_count*sizeof(uint32_t))/1048576.0);
+    state.terrain_index_count = (int)state.terrain.mesh.index_count;
     state.bindings.vertex_buffers[0] = sg_make_buffer(&(sg_buffer_desc){
-        .data = {state.terrain.vertices, state.terrain.quads*4*sizeof(yard_terrain_vertex)},
+        .data = {state.terrain.mesh.vertices, state.terrain.mesh.vertex_count*sizeof(yard_mesh_vertex)},
         .label = "static voxel terrain vertices",
     });
     state.bindings.index_buffer = sg_make_buffer(&(sg_buffer_desc){
         .usage.index_buffer = true,
-        .data = {state.terrain.indices, state.terrain.quads*6*sizeof(uint32_t)},
+        .data = {state.terrain.mesh.indices, state.terrain.mesh.index_count*sizeof(uint32_t)},
         .label = "static voxel terrain indices",
     });
     if (sg_query_buffer_state(state.bindings.vertex_buffers[0]) != SG_RESOURCESTATE_VALID ||
@@ -133,7 +136,7 @@ static void init(void) {
         fprintf(stderr, "Cannot upload terrain mesh.\n");
         exit(EXIT_FAILURE);
     }
-    yard_terrain_free_mesh(&state.terrain);
+    yard_mesh_destroy(&state.terrain.mesh);
     sg_shader shader = sg_make_shader(cube_shader_desc(sg_query_backend()));
     state.pipeline = sg_make_pipeline(&(sg_pipeline_desc){
         .shader = shader,
@@ -249,7 +252,7 @@ static void frame(void) {
         sg_apply_bindings(&state.bindings);
         sg_apply_uniforms(UB_vs_params, &SG_RANGE(uniforms));
         sg_apply_uniforms(UB_light_params, &SG_RANGE(light));
-        sg_draw(0, (int)(state.terrain.quads*6), 1);
+        sg_draw(0, state.terrain_index_count, 1);
         sg_end_pass();
         ++state.captures;
     }
