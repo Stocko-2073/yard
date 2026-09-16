@@ -6,7 +6,7 @@ zenith brightness divided by natural zenith brightness (LPI), **not a Bortle
 class**, direct ground illumination, or a local light fixture measurement.
 At 32.8908277, -84.3271342 the LPI is 5.44249805476, so total natural plus
 artificial zenith brightness is about 6.44 times the atlas's natural reference.
-The compiled default in `src/skyglow.c` is checked against this profile by tests.
+The compiled default in `src/skyglow.cpp` is checked against this profile by tests.
 
 Sources and attribution:
 
@@ -35,7 +35,7 @@ To reproduce the bundled profile (Python 3, network required):
 python3 tools/fetch-skyglow.py --latitude 32.8908277 --longitude -84.3271342 --year 2025 --output data/default-site.txt
 ```
 
-If updating this sample, also update the compiled constant in `src/skyglow.c`.
+If updating this sample, also update the compiled constant in `src/skyglow.cpp`.
 For offline reproduction, download the source tile and pass `--tile FILE.dat.gz`;
 that option trusts that the supplied tile matches the requested coordinates/year.
 The numeric atlas has no versioned checksum manifest; each profile records the

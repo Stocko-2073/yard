@@ -1,6 +1,5 @@
 #ifndef YARD_CAMERA_H
 #define YARD_CAMERA_H
-#include <stdbool.h>
 
 enum { YARD_CAMERA_MAX_GAINS = 64 };
 typedef struct {

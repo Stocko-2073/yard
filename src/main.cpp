@@ -1,7 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include <math.h>
 #include <stdlib.h>
-#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -60,53 +59,63 @@ static void sunlight(const double direction[3], float color[4], double intensity
 }
 
 static void init(void) {
-    sg_setup(&(sg_desc){
-        .environment = sglue_environment(),
-        .logger.func = slog_func,
-    });
+    sg_desc graphics = {};
+    graphics.environment = sglue_environment();
+    graphics.logger.func = slog_func;
+    sg_setup(graphics);
 
     static const float sky_vertices[][2] = {{-1,-1}, {3,-1}, {-1,3}};
-    state.sky_bindings.vertex_buffers[0] = sg_make_buffer(&(sg_buffer_desc){
+    state.sky_bindings.vertex_buffers[0] = sg_make_buffer(sg_buffer_desc{
         .data = SG_RANGE(sky_vertices), .label = "sky triangle",
     });
-    sg_image camera_color = sg_make_image(&(sg_image_desc){
-        .usage.color_attachment = true,
-        .width = state.camera.profile.width, .height = state.camera.profile.height,
-        .pixel_format = SG_PIXELFORMAT_RGBA8, .sample_count = 1,
-        .label = "SVGA camera color",
+    sg_image_desc color_desc = {};
+    color_desc.usage.color_attachment = true;
+    color_desc.width = state.camera.profile.width;
+    color_desc.height = state.camera.profile.height;
+    color_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    color_desc.sample_count = 1;
+    color_desc.label = "SVGA camera color";
+    sg_image camera_color = sg_make_image(color_desc);
+    sg_image_desc depth_desc = {};
+    depth_desc.usage.depth_stencil_attachment = true;
+    depth_desc.width = state.camera.profile.width;
+    depth_desc.height = state.camera.profile.height;
+    depth_desc.pixel_format = SG_PIXELFORMAT_DEPTH;
+    depth_desc.sample_count = 1;
+    depth_desc.label = "SVGA camera depth";
+    sg_image camera_depth = sg_make_image(depth_desc);
+    sg_view_desc color_view = {};
+    color_view.color_attachment.image = camera_color;
+    sg_view_desc depth_view = {};
+    depth_view.depth_stencil_attachment.image = camera_depth;
+    state.camera_attachments = {};
+    state.camera_attachments.colors[0] = sg_make_view(color_view);
+    state.camera_attachments.depth_stencil = sg_make_view(depth_view);
+    sg_view_desc texture_view = {};
+    texture_view.texture.image = camera_color;
+    state.preview_bindings = {};
+    state.preview_bindings.vertex_buffers[0] = state.sky_bindings.vertex_buffers[0];
+    state.preview_bindings.views[VIEW_camera_image] = sg_make_view(texture_view);
+    state.preview_bindings.samplers[SMP_camera_sampler] = sg_make_sampler(sg_sampler_desc{
+        .min_filter = SG_FILTER_NEAREST, .mag_filter = SG_FILTER_NEAREST,
+        .wrap_u = SG_WRAP_CLAMP_TO_EDGE, .wrap_v = SG_WRAP_CLAMP_TO_EDGE,
     });
-    sg_image camera_depth = sg_make_image(&(sg_image_desc){
-        .usage.depth_stencil_attachment = true,
-        .width = state.camera.profile.width, .height = state.camera.profile.height,
-        .pixel_format = SG_PIXELFORMAT_DEPTH, .sample_count = 1,
-        .label = "SVGA camera depth",
-    });
-    state.camera_attachments = (sg_attachments){
-        .colors[0] = sg_make_view(&(sg_view_desc){.color_attachment.image = camera_color}),
-        .depth_stencil = sg_make_view(&(sg_view_desc){.depth_stencil_attachment.image = camera_depth}),
-    };
-    state.preview_bindings = (sg_bindings){
-        .vertex_buffers[0] = state.sky_bindings.vertex_buffers[0],
-        .views[VIEW_camera_image] = sg_make_view(&(sg_view_desc){.texture.image = camera_color}),
-        .samplers[SMP_camera_sampler] = sg_make_sampler(&(sg_sampler_desc){
-            .min_filter = SG_FILTER_NEAREST, .mag_filter = SG_FILTER_NEAREST,
-            .wrap_u = SG_WRAP_CLAMP_TO_EDGE, .wrap_v = SG_WRAP_CLAMP_TO_EDGE,
-        }),
-    };
-    state.preview_pipeline = sg_make_pipeline(&(sg_pipeline_desc){
-        .shader = sg_make_shader(preview_shader_desc(sg_query_backend())),
-        .layout.attrs[ATTR_preview_position].format = SG_VERTEXFORMAT_FLOAT2,
-        .depth = {.compare = SG_COMPAREFUNC_ALWAYS},
-        .label = "camera preview",
-    });
-    state.sky_pipeline = sg_make_pipeline(&(sg_pipeline_desc){
-        .shader = sg_make_shader(sky_shader_desc(sg_query_backend())),
-        .layout.attrs[ATTR_sky_position].format = SG_VERTEXFORMAT_FLOAT2,
-        .depth = {.pixel_format = SG_PIXELFORMAT_DEPTH, .write_enabled = false, .compare = SG_COMPAREFUNC_ALWAYS},
-        .colors[0].pixel_format = SG_PIXELFORMAT_RGBA8,
-        .sample_count = 1,
-        .label = "atmosphere and ground",
-    });
+    sg_pipeline_desc preview_pipeline = {};
+    preview_pipeline.shader = sg_make_shader(preview_shader_desc(sg_query_backend()));
+    preview_pipeline.layout.attrs[ATTR_preview_position].format = SG_VERTEXFORMAT_FLOAT2;
+    preview_pipeline.depth.compare = SG_COMPAREFUNC_ALWAYS;
+    preview_pipeline.label = "camera preview";
+    state.preview_pipeline = sg_make_pipeline(preview_pipeline);
+    sg_pipeline_desc sky_pipeline = {};
+    sky_pipeline.shader = sg_make_shader(sky_shader_desc(sg_query_backend()));
+    sky_pipeline.layout.attrs[ATTR_sky_position].format = SG_VERTEXFORMAT_FLOAT2;
+    sky_pipeline.depth.pixel_format = SG_PIXELFORMAT_DEPTH;
+    sky_pipeline.depth.write_enabled = false;
+    sky_pipeline.depth.compare = SG_COMPAREFUNC_ALWAYS;
+    sky_pipeline.colors[0].pixel_format = SG_PIXELFORMAT_RGBA8;
+    sky_pipeline.sample_count = 1;
+    sky_pipeline.label = "atmosphere and ground";
+    state.sky_pipeline = sg_make_pipeline(sky_pipeline);
 
     // Separate vertices per face let each face have a solid color.
     static const float vertices[][6] = {
@@ -127,28 +136,28 @@ static void init(void) {
         0,1,2, 0,2,3, 4,5,6, 4,6,7, 8,9,10, 8,10,11,
         12,13,14, 12,14,15, 16,17,18, 16,18,19, 20,21,22, 20,22,23,
     };
-    state.bindings.vertex_buffers[0] = sg_make_buffer(&(sg_buffer_desc){
+    state.bindings.vertex_buffers[0] = sg_make_buffer(sg_buffer_desc{
         .data = SG_RANGE(vertices), .label = "cube vertices",
     });
-    state.bindings.index_buffer = sg_make_buffer(&(sg_buffer_desc){
-        .usage.index_buffer = true,
-        .data = SG_RANGE(indices), .label = "cube indices",
-    });
-    sg_shader shader = sg_make_shader(cube_shader_desc(sg_query_backend()));
-    state.pipeline = sg_make_pipeline(&(sg_pipeline_desc){
-        .shader = shader,
-        .layout.attrs = {
-            [ATTR_cube_position].format = SG_VERTEXFORMAT_FLOAT3,
-            [ATTR_cube_color].format = SG_VERTEXFORMAT_FLOAT3,
-        },
-        .index_type = SG_INDEXTYPE_UINT16,
-        .cull_mode = SG_CULLMODE_BACK,
-        .face_winding = SG_FACEWINDING_CCW,
-        .depth = {.pixel_format = SG_PIXELFORMAT_DEPTH, .write_enabled = true, .compare = SG_COMPAREFUNC_LESS_EQUAL},
-        .colors[0].pixel_format = SG_PIXELFORMAT_RGBA8,
-        .sample_count = 1,
-        .label = "cube pipeline",
-    });
+    sg_buffer_desc index_buffer = {};
+    index_buffer.usage.index_buffer = true;
+    index_buffer.data = SG_RANGE(indices);
+    index_buffer.label = "cube indices";
+    state.bindings.index_buffer = sg_make_buffer(index_buffer);
+    sg_pipeline_desc cube_pipeline = {};
+    cube_pipeline.shader = sg_make_shader(cube_shader_desc(sg_query_backend()));
+    cube_pipeline.layout.attrs[ATTR_cube_position].format = SG_VERTEXFORMAT_FLOAT3;
+    cube_pipeline.layout.attrs[ATTR_cube_color].format = SG_VERTEXFORMAT_FLOAT3;
+    cube_pipeline.index_type = SG_INDEXTYPE_UINT16;
+    cube_pipeline.cull_mode = SG_CULLMODE_BACK;
+    cube_pipeline.face_winding = SG_FACEWINDING_CCW;
+    cube_pipeline.depth.pixel_format = SG_PIXELFORMAT_DEPTH;
+    cube_pipeline.depth.write_enabled = true;
+    cube_pipeline.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+    cube_pipeline.colors[0].pixel_format = SG_PIXELFORMAT_RGBA8;
+    cube_pipeline.sample_count = 1;
+    cube_pipeline.label = "cube pipeline";
+    state.pipeline = sg_make_pipeline(cube_pipeline);
 }
 
 static void frame(void) {
@@ -203,12 +212,12 @@ static void frame(void) {
             .lens = {1.0f / tanf(state.vertical_fov * 0.00872664626f), 0, 0, 0},
             .camera_position = {state.position[0], state.position[1], state.position[2], 0},
         };
-        light_params_t light = {0};
+        light_params_t light = {};
         sunlight(state.ephemeris.sun, light.sun_color, 3.0);
         light.camera_exposure[0] = yard_camera_multiplier(&state.camera);
         yard_night_light(&state.site, state.ephemeris.sun[1], light.night_radiance);
         for (int i=0; i<3; ++i) light.sun_direction[i] = (float)state.ephemeris.sun[i];
-        sky_params_t sky = {0};
+        sky_params_t sky = {};
         sky.sky_camera_exposure[0] = light.camera_exposure[0];
         memcpy(sky.sky_night_radiance, light.night_radiance, sizeof(sky.sky_night_radiance));
         memcpy(sky.sky_camera_position, uniforms.camera_position, sizeof(sky.sky_camera_position));
@@ -222,21 +231,19 @@ static void frame(void) {
             sky.moon_north[i] = (float)state.ephemeris.celestial_north[i];
         }
         sky.sky_moon[3] = (float)state.ephemeris.moon_radius;
-        sg_begin_pass(&(sg_pass){
-            .action.colors[0] = {
-                .load_action = SG_LOADACTION_CLEAR,
-                .clear_value = {.r = .055f, .g = .075f, .b = .09f, .a = 1},
-            },
-            .attachments = state.camera_attachments,
-        });
+        sg_pass camera_pass = {};
+        camera_pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
+        camera_pass.action.colors[0].clear_value = {.r = .055f, .g = .075f, .b = .09f, .a = 1};
+        camera_pass.attachments = state.camera_attachments;
+        sg_begin_pass(camera_pass);
         sg_apply_pipeline(state.sky_pipeline);
         sg_apply_bindings(&state.sky_bindings);
-        sg_apply_uniforms(UB_sky_params, &SG_RANGE(sky));
+        sg_apply_uniforms(UB_sky_params, SG_RANGE(sky));
         sg_draw(0, 3, 1);
         sg_apply_pipeline(state.pipeline);
         sg_apply_bindings(&state.bindings);
-        sg_apply_uniforms(UB_vs_params, &SG_RANGE(uniforms));
-        sg_apply_uniforms(UB_light_params, &SG_RANGE(light));
+        sg_apply_uniforms(UB_vs_params, SG_RANGE(uniforms));
+        sg_apply_uniforms(UB_light_params, SG_RANGE(light));
         sg_draw(0, 36, 1);
         sg_end_pass();
         ++state.captures;
@@ -247,15 +254,16 @@ static void frame(void) {
     int width = (int)(state.camera.profile.width*scale), height = (int)(state.camera.profile.height*scale);
     if (width < 1) width = 1;
     if (height < 1) height = 1;
-    sg_begin_pass(&(sg_pass){
-        .action.colors[0] = {.load_action = SG_LOADACTION_CLEAR, .clear_value = {0,0,0,1}},
-        .swapchain = sglue_swapchain(),
-    });
+    sg_pass preview_pass = {};
+    preview_pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
+    preview_pass.action.colors[0].clear_value = {0,0,0,1};
+    preview_pass.swapchain = sglue_swapchain();
+    sg_begin_pass(preview_pass);
     sg_apply_viewport((window_width-width)/2, (window_height-height)/2, width, height, true);
     sg_apply_pipeline(state.preview_pipeline);
     sg_apply_bindings(&state.preview_bindings);
     const preview_params_t preview = {.preview_settings = {state.zoom ? 8.0f : 1.0f,0,0,0}};
-    sg_apply_uniforms(UB_preview_params, &SG_RANGE(preview));
+    sg_apply_uniforms(UB_preview_params, SG_RANGE(preview));
     sg_draw(0, 3, 1);
     sg_end_pass();
     sg_commit();
@@ -282,7 +290,7 @@ static void event(const sapp_event *ev) {
         if (ev->mouse_dx != 0 || ev->mouse_dy != 0) state.track_moon = false;
     }
     if ((ev->type == SAPP_EVENTTYPE_KEY_DOWN || ev->type == SAPP_EVENTTYPE_KEY_UP) &&
-        ev->key_code > 0 && ev->key_code < SAPP_MAX_KEYCODES) {
+        ev->key_code > 0 && static_cast<int>(ev->key_code) < SAPP_MAX_KEYCODES) {
         state.keys[ev->key_code] = ev->type == SAPP_EVENTTYPE_KEY_DOWN;
     }
     if (ev->type != SAPP_EVENTTYPE_KEY_DOWN || ev->key_repeat) return;
@@ -320,7 +328,7 @@ static void event(const sapp_event *ev) {
         state.position[2] = 8;
         state.yaw = 0;
         state.pitch = -0.10f;
-        state.utc = (double)time(NULL);
+        state.utc = (double)time(nullptr);
         state.track_moon = false;
         state.zoom = false;
         state.paused = false;
@@ -337,15 +345,15 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     state.site = yard_default_site;
     yard_camera_init(&state.camera, &yard_ov2640_svga);
     state.vertical_fov = 60.0f; // XIAO Sense OV2640 stock lens FOV is not yet calibrated.
-    state.utc = (double)time(NULL);
+    state.utc = (double)time(nullptr);
     state.position[1] = 2.5f;
     state.position[2] = 8;
     state.pitch = -0.10f;
     state.angle = 0.4f;
     state.title_minute = INT64_MIN;
-    const char *requested_date = NULL;
+    const char *requested_date = nullptr;
     double requested_hour = -1;
-    const char *profile_path = NULL;
+    const char *profile_path = nullptr;
     double exposure_ms = -1, gain = -1, exposure_lines = -1, gain_index = -1;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--smoke-test") == 0) state.smoke_test = true;
@@ -372,14 +380,14 @@ sapp_desc sokol_main(int argc, char *argv[]) {
         }
         else if (strcmp(argv[i], "--vfov") == 0 && i+1 < argc) {
             const char *argument = argv[++i];
-            char *end = NULL;
+            char *end = nullptr;
             state.vertical_fov = strtof(argument, &end);
             if (!isfinite(state.vertical_fov) || end == argument || *end != '\0' ||
                 state.vertical_fov < 1 || state.vertical_fov > 170) goto usage;
         }
         else if (strcmp(argv[i], "--date") == 0 && i+1 < argc) requested_date = argv[++i];
         else if (strcmp(argv[i], "--time") == 0 && i+1 < argc) {
-            char *end = NULL;
+            char *end = nullptr;
             const char *argument = argv[++i];
             requested_hour = strtod(argument, &end);
             if (!isfinite(requested_hour) || end == argument || *end != '\0' ||
@@ -416,11 +424,11 @@ sapp_desc sokol_main(int argc, char *argv[]) {
            state.camera.gain_index, yard_camera_multiplier(&state.camera));
     printf("Yard: skyglow atlas %d, lat %.7f lon %.7f, artificial/natural %.4f\n",
            state.site.year, state.site.latitude, state.site.longitude, state.site.artificial_ratio);
-    return (sapp_desc){
+    return sapp_desc{
         .init_cb = init, .frame_cb = frame, .cleanup_cb = cleanup, .event_cb = event,
         .width = state.camera.profile.width, .height = state.camera.profile.height, .sample_count = 1, .high_dpi = true,
         .window_title = "Yard | Click: mouse look | WASD: move | Esc: release/quit",
-        .logger.func = slog_func,
+        .logger = {.func = slog_func},
     };
 usage:
     fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--smoke-test] [--site profile]\n"

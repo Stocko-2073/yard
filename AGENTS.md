@@ -16,7 +16,7 @@ and visual/sensor representation, with one physics owner per dynamic object.
 
 ## Current scaffold
 
-- C11 application code in `src/main.c`; sun/moon ephemeris in `src/astronomy.c`.
+- C++20 application code in `src/main.cpp`; sun/moon ephemeris in `src/astronomy.cpp`.
 - Sky location: Thomaston GA (32.8908277 N, 84.3271342 W); UTC simulation clock
   with America/New_York calendar input/display. Keep sun and moon on the same clock.
 - Show location as latitude/longitude in the app; do not display city names.

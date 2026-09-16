@@ -16,7 +16,8 @@ The planned environment includes:
 
 ## Running the scaffold on macOS
 
-Requires Apple's command-line developer tools (`xcode-select --install`) or
+The application and native tests use C++20; the Sokol implementation uses
+Objective-C with ARC. Requires Apple's command-line developer tools (`xcode-select --install`) or
 Xcode, and an Apple Silicon Mac with Metal support. Install the pinned shader
 compiler once with `make setup-tools` (requires network). Subsequent builds work
 offline; the Sokol headers are vendored.
@@ -173,12 +174,12 @@ a general scene will need a scene shadow system. The sky integrates 16 view
 samples with eight sun samples each per fragment; a cached sky lookup texture
 is a possible optimization as the yard grows.
 
-- `src/main.c`: application lifecycle, cube geometry, rendering, and input.
-- `src/astronomy.c`: sun/moon ephemeris and local calendar conversion.
-- `src/skyglow.c`: offline site profiles and location-dependent night lighting.
-- `src/camera.c`: camera profiles, manual exposure, and gain response.
+- `src/main.cpp`: application lifecycle, cube geometry, rendering, and input.
+- `src/astronomy.cpp`: sun/moon ephemeris and local calendar conversion.
+- `src/skyglow.cpp`: offline site profiles and location-dependent night lighting.
+- `src/camera.cpp`: camera profiles, manual exposure, and gain response.
 - `tools/fetch-skyglow.py`: explicit numeric atlas download and site sampling.
-- `tests/astronomy_test.c`: astronomy reference and calendar regression checks.
+- `tests/astronomy_test.cpp`: astronomy reference and calendar regression checks.
 - `src/sokol.m`: Sokol implementation compiled as Objective-C for macOS/Metal.
 - `shaders/cube.glsl`: portable annotated GLSL, compiled by `sokol-shdc`.
 - `build/generated/cube.glsl.h`: generated shader sources, uniform types, and
