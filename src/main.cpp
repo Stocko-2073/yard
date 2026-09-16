@@ -44,7 +44,7 @@ static struct {
     unsigned captures;
     sg_pipeline pipeline;
     const char* tree_species;
-    bool geometry_demo;
+    bool geometry_demo, yard_demo;
     int object_index_count;
     sg_pipeline object_pipeline;
     sg_bindings object_bindings;
@@ -433,7 +433,7 @@ static void init(void) {
     printf("Yard: %d grass blades, 5 cm tall, 5 mm wide, %.1f MiB root buffer\n",
            state.grass_count, state.grass_count*sizeof(float)/1048576.0);
     state.grass_count = 0;
-    if (!state.no_grass) for (int i=0; i<state.layout.count; ++i) {
+    for (int i=0; i<state.layout.count; ++i) {
         const yard_draw_region *r=&state.layout.regions[i];
         state.grass_count += (r->width*r->depth+state.grass_stride-1)/state.grass_stride;
     }
@@ -487,10 +487,11 @@ static void frame(void) {
     if (state.terrain_smoke_test) {
         yard_local_datetime("2026-09-14", 9, &state.utc);
         float progress = state.captures / 120.0f;
-        state.position[0] = 12.0f*sinf(progress*6.2831853f);
-        state.position[2] = 12.0f*cosf(progress*6.2831853f);
+        float radius=state.yard_demo ? 22.0f : 12.0f;
+        state.position[0] = radius*sinf(progress*6.2831853f);
+        state.position[2] = (state.yard_demo ? -6.0f : 0.0f)+radius*cosf(progress*6.2831853f);
         state.yaw = progress*6.2831853f;
-        state.pitch = -0.35f;
+        state.pitch = state.yard_demo ? .06f : -.35f;
         state.track_moon = false;
         state.zoom = false;
     }
@@ -508,7 +509,7 @@ static void frame(void) {
         yard_local_calendar(state.utc, &local);
         strftime(date, sizeof(date), "%Y-%m-%d %H:%M %Z", &local);
         snprintf(title, sizeof(title), "Yard | %dx%d %dx SSAA %dx MSAA | Culling %s | Grass %s | Manual %.2f ms %.1fx (AEC %d, gain %d) | Lat %.5f, Lon %.5f | %s | Moon %.0f%% %s%s",
-                 state.camera.profile.width, state.camera.profile.height, state.ssaa, state.msaa, state.no_culling ? "off" : "on", state.grass_volume ? "volume LOD" : "blades", yard_camera_exposure_ms(&state.camera),
+                 state.camera.profile.width, state.camera.profile.height, state.ssaa, state.msaa, state.no_culling ? "off" : "on", state.no_grass ? "off" : (state.grass_volume ? "volume LOD" : "blades"), yard_camera_exposure_ms(&state.camera),
                  yard_camera_gain(&state.camera), state.camera.exposure_lines, state.camera.gain_index,
                  state.site.latitude, state.site.longitude, date, state.ephemeris.illuminated*100, state.ephemeris.waxing ? "waxing" : "waning",
                  state.ephemeris.moon[1] < 0 ? " (below horizon)" : "");
@@ -578,7 +579,7 @@ static void frame(void) {
         sg_apply_uniforms(UB_vs_params,SG_RANGE(uniforms));
         sg_apply_uniforms(UB_light_params,SG_RANGE(light));
         sg_draw(0,state.object_index_count,1);
-        if (state.grass_count > 0) {
+        if (state.grass_count > 0 && !state.no_grass) {
             sg_apply_pipeline(state.grass_pipeline);
             sg_apply_uniforms(UB_vs_params, SG_RANGE(uniforms));
             sg_apply_uniforms(UB_light_params, SG_RANGE(light));
@@ -694,6 +695,10 @@ static void event(const sapp_event *ev) {
         yard_camera_step_gain(&state.camera, ev->key_code == SAPP_KEYCODE_EQUAL ? 1 : -1);
         state.title_minute = INT64_MIN;
     }
+    if (ev->key_code == SAPP_KEYCODE_G) {
+        state.no_grass=!state.no_grass;
+        state.title_minute=INT64_MIN;
+    }
     if (ev->key_code == SAPP_KEYCODE_V) {
         state.grass_volume=!state.grass_volume;
         state.title_minute=INT64_MIN;
@@ -726,9 +731,9 @@ static void event(const sapp_event *ev) {
     }
     if (ev->key_code == SAPP_KEYCODE_R) {
         state.position[0] = 0;
-        state.position[2] = 8;
+        state.position[2] = state.yard_demo ? 18 : 8;
         state.yaw = 0;
-        state.pitch = -0.10f;
+        state.pitch = state.yard_demo ? .08f : -.10f;
         state.utc = (double)time(nullptr);
         state.track_moon = false;
         state.zoom = false;
@@ -754,8 +759,8 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     state.eye_height = 1.6f;
     state.vertical_fov = 60.0f; // XIAO Sense OV2640 stock lens FOV is not yet calibrated.
     state.utc = (double)time(nullptr);
-    state.position[2] = 8;
-    state.pitch = -0.10f;
+    state.position[2] = state.yard_demo ? 18 : 8;
+    state.pitch = state.yard_demo ? .08f : -.10f;
     state.title_minute = INT64_MIN;
     const char *requested_date = nullptr;
     double requested_hour = -1;
@@ -763,6 +768,8 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     double exposure_ms = -1, gain = -1, exposure_lines = -1, gain_index = -1;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--smoke-test") == 0) state.smoke_test = true;
+        else if (strcmp(argv[i], "--yard-demo") == 0) state.yard_demo=true;
+        else if (strcmp(argv[i], "--yard-smoke-test") == 0) {state.yard_demo=true;state.terrain_smoke_test=true;}
         else if (strcmp(argv[i], "--terrain-smoke-test") == 0) state.terrain_smoke_test = true;
         else if (strcmp(argv[i], "--grass-volume") == 0) state.grass_volume=true;
         else if ((strcmp(argv[i],"--lod-start")==0 || strcmp(argv[i],"--lod-end")==0) && i+1<argc) {
@@ -835,6 +842,10 @@ sapp_desc sokol_main(int argc, char *argv[]) {
                 requested_hour < 0 || requested_hour >= 24) goto usage;
         } else goto usage;
     }
+    if (state.yard_demo) {
+        if (!state.tree_species) state.tree_species="quaking_aspen";
+        state.position[2]=18;state.pitch=.08f;
+    }
     if (state.smoke_test && state.terrain_smoke_test) goto usage;
     if (profile_path) {
         yard_camera_profile profile;
@@ -879,8 +890,8 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     app.logger.func = slog_func;
     return app;
 usage:
-    fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--eye-height metres] [--smoke-test | --terrain-smoke-test] [--site profile] [--tree species] [--geometry-demo]\n"
-                    "Grass LOD: [--grass-volume] [--lod-start metres] [--lod-end metres] (V toggles)\n"
+    fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--eye-height metres] [--smoke-test | --terrain-smoke-test] [--site profile] [--tree species] [--geometry-demo] [--yard-demo | --yard-smoke-test]\n"
+                    "Grass LOD: [--grass-volume] [--lod-start metres] [--lod-end metres] (V toggles volume, G toggles grass)\n"
                     "Rendering: [--ssaa 1|8] [--msaa 1|4] [--no-culling] [--no-grass] [--grass-stride 1..64] (diagnostic density reduction)\n"
                     "Camera: [--camera-profile FILE] [--exposure-ms MS | --aec-value LINES] [--gain MULTIPLIER | --agc-gain INDEX]\n"
                     "OV2640 default: manual shutter 0-33.333333 ms (AEC 0-1200, frame-capped), gain 1-31x (index 0-30).\n"

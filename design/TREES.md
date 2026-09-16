@@ -29,6 +29,9 @@ The shared renderer defaults to 8× spatial supersampling and supports optional
 grass-volume LOD; see the README. Fixed SVGA refers to the final camera image,
 not the internal rendering resolution.
 
+Use `--yard-demo --tree SPECIES` for the framed tree/grass preview; see
+[yard integration](YARD_DEMO.md).
+
 ## Skeleton and meshes
 
 `src/tree.h` exposes three independent operations:

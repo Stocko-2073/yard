@@ -111,3 +111,9 @@ build/terrain-test: tests/terrain_test.cpp src/terrain.cpp src/marching_cubes.cp
 	$(CXX) $(CXXFLAGS) -O2 -Isrc tests/terrain_test.cpp src/terrain.cpp src/marching_cubes.cpp -o $@
 build/visibility-test: tests/visibility_test.cpp src/visibility.cpp src/terrain.cpp src/marching_cubes.cpp src/visibility.h src/terrain.h src/marching_cubes.h vendor/marching_cubes/tables.h | build
 	$(CXX) $(CXXFLAGS) -O2 -Isrc tests/visibility_test.cpp src/visibility.cpp src/terrain.cpp src/marching_cubes.cpp -o $@
+
+.PHONY: yard-smoke-test run-yard
+run-yard: build/yard
+	./build/yard --yard-demo --time 12
+yard-smoke-test: build/yard
+	./build/yard --yard-smoke-test

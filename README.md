@@ -344,6 +344,29 @@ The tree port is GPLv3; [NOTICE](NOTICE) and [COPYING](COPYING) preserve attribu
 and licensing for the combined application. Other vendored components retain
 their original licenses.
 
+## Trees in the grassy yard
+
+```sh
+make run-yard
+# Or select a species and a fixed local date/time:
+./build/yard --yard-demo --tree quaking_aspen --date 2026-09-15 --time 12
+make yard-smoke-test
+```
+
+`--yard-demo` combines the tree port with the existing voxel-terrain and grass
+prototype. It starts with an aspen on a 63.61 m square of rolling ground, with
+one 5 cm grass blade per centimetre surface column. **G** toggles grass to inspect
+the soil and trunk contact; `--no-grass` starts with soil exposed. WASD and mouse
+look work as usual, and the camera follows the surface at 1.6 m eye height.
+The tree is planted at the terrain height, with its base embedded 2 cm.
+
+This is a static preview, with no collision, growth, or tree/terrain shadows.
+The dense 1 cm × 64 cm terrain volume alone uses about 2.4 GiB, so startup takes
+several seconds. Frustum culling submits visible 2.56 m draw regions. This mode uses the same restored 8× supersampling, configurable MSAA, and
+optional grass-volume LOD as the terrain renderer. **V** toggles volume LOD and
+**C** toggles culling; `--ssaa 1` provides the unfiltered comparison. The final
+camera image remains 800×600. See [integration notes](design/YARD_DEMO.md).
+
 ## Camera exposure
 
 Manual controls follow the OV2640's line-based shutter and Espressif gain steps.
