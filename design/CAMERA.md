@@ -112,3 +112,35 @@ Retina, and preview zoom still cannot change its resolution or projection.
 The default OV2640 profile remains SVGA at up to 30 fps. Future profiles can
 specify different timings and nonuniform gain steps; sensor-specific nonlinear
 response and automatic metering will require extending the camera model.
+
+## Spatial anti-aliasing
+
+The current experiment defaults to `--ssaa 8 --msaa 1`: approximately eight times
+the sensor pixel count, using `ceil(width × sqrt(8))` and `ceil(height × sqrt(8))`.
+The OV2640 profile therefore renders at 2263×1698 and produces the same fixed
+800×600 RGBA8 image. `--ssaa 1` uses native resolution. The projection always uses
+the sensor's nominal aspect and FOV; resizing, Retina and preview zoom cannot
+alter its intrinsics or the internal supersampling target dimensions.
+
+An area-weighted box filter integrates overlapping source pixels for each output
+pixel, handling fractional scale and image edges. Scene RGB stays linear HDR
+through opaque rendering and the optional grass-volume composite. The downsample
+shader applies exposure and tone mapping per source sample, averages in linear
+display light, then encodes sRGB and converts to RGBA8. This is performed after the existing tone curve, so it is a rendering
+approximation rather than calibrated lens or photosite filtering.
+
+`--msaa 1|4` controls coverage sampling independently, defaulting to 1. When enabled,
+scene color/depth and all scene pipelines have matching multisample counts; a
+hardware resolve precedes spatial downsampling. Camera profiles continue to
+control resolution and exposure timing independently of these renderer options.
+
+TAA, its projection jitter, and cross-frame history have been removed. Each
+captured image is instantaneous. No shutter integration or motion blur is added.
+
+
+The optional grass density LOD composites in linear scene light before exposure
+and tone mapping. RGBA16F alpha carries forward camera depth for clipping the ray
+march against opaque surfaces; it is not output opacity. The final camera image
+still has opaque alpha. With MSAA enabled, the resolved depth is an average at
+mixed-coverage edges, so the volume can approximate object intersections there.
+The default MSAA-off supersampled path uses one depth per internal sample.

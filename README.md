@@ -16,8 +16,8 @@ The planned environment includes:
 
 ## Running the scaffold on macOS
 
-The application and native tests use C++20; the Sokol implementation uses
-Objective-C with ARC. Requires Apple's command-line developer tools (`xcode-select --install`) or
+The application and native tests use C++20; Sokol uses Objective-C with ARC.
+Requires Apple's command-line developer tools (`xcode-select --install`) or
 Xcode, and an Apple Silicon Mac with Metal support. Install the pinned shader
 compiler once with `make setup-tools` (requires network). Subsequent builds work
 offline; the Sokol headers are vendored.
@@ -29,8 +29,8 @@ make run
 ```
 
 The app opens a resizable Metal window with an atmospheric sky, date-driven sun
-and moon, a lit cube, and a ground plane with a metre grid and a directional
-sun shadow. The default camera produces a fixed **800×600, 4:3** image at up to **30 fps**,
+and moon, and a static, mildly lumpy voxel yard. A ground plane with a metre
+grid extends beyond the yard boundary. The default camera produces a fixed **800×600, 4:3** image at up to **30 fps**,
 matching the OV2640's SVGA output dimensions and maximum nominal frame rate
 ([sensor datasheet](https://files.waveshare.com/wiki/common/OV2640DS_en.pdf)).
 The window starts at 800×600 logical pixels. Resizing letterboxes the same camera
@@ -49,8 +49,11 @@ calibration will also account for lens distortion.
 
 This models resolution, aspect ratio, capture cadence, and manual shutter/gain
 response. Lens distortion, automatic exposure/gain, temporal shutter integration,
-rolling shutter, Bayer sampling, noise, and JPEG/RGB565 output are not simulated. The camera target is single-sample
-RGBA8, with no MSAA. Sun and moon retain their physical angular sizes.
+rolling shutter, Bayer sampling, noise, and JPEG/RGB565 output are not simulated.
+The camera defaults to **8× spatial supersampling** (about eight times the
+pixel count), downsampled into the same fixed RGBA8 image. `--ssaa 1` selects
+native-resolution rendering. `--msaa 1|4` controls MSAA independently; it defaults
+to 1 for the supersampling experiment. Sun and moon retain their physical angular sizes.
 
 The default location is **Thomaston, Georgia, USA**: 32.8908277° N, 84.3271342° W
 ([US Census city coordinates](https://tigerweb.geo.census.gov/tigerwebmain/Files/acs25/tigerweb_acs25_incplace_2025_bas25_ga.html)).
@@ -67,7 +70,8 @@ system's `America/New_York` timezone database, including daylight saving.
 - **Left click**: capture the mouse; move the mouse to look. **Escape** releases
   it; press Escape again while released to quit. Losing focus releases the mouse.
   Movement and mouse look cancel moon tracking and work while time is paused.
-  This is viewer navigation at a fixed 2.5 m eye height, without collision handling.
+  The viewer follows the voxel surface at a default 1.6 m eye height, without
+  collision handling. Set `--eye-height METRES` (0.1–10) for other viewpoints.
 - **M**: toggle moon tracking. A moon below the horizon remains hidden by ground;
   its status appears in the title. Step time forward to see it rise.
 - **Z**: toggle 8× digital preview magnification of the captured image; it does
@@ -97,29 +101,248 @@ a published position example, and calendar/DST boundaries, without a GUI.
 moon dates on Metal, then exits; it requires a graphical macOS session and checks
 rendering execution, not visual correctness. `make clean` removes build output.
 
-## Procedural geometry
+## Static marching-cubes yard prototype
 
-The standalone C++ geometry engine generates indexed meshes with normals and UVs
-from cubic Bézier curves, tapered profile sweeps, and planar polygons with holes.
-Curve tolerances and profile segment counts control generated detail. Earcut
-v2.2.4 is vendored under ISC for polygon triangulation; builds remain offline.
-See [the library comparison, API, limitations, and measurements](design/GEOMETRY.md).
-The C++ tree-gen port consumes this engine and includes 20 species presets,
-separate branch skeletons and foliage, and configurable mesh detail. See
-[tree generation, Blender comparisons, and benchmarks](design/TREES.md).
-The port is GPLv3; [NOTICE](NOTICE) and [COPYING](COPYING) describe attribution
-and the license included with the combined application.
+The yard occupies **63.61 × 63.61 m** (4,046.23 m², just under one acre), with
+**6,361 × 6,361 × 64 one-centimeter cells** and one byte per cell. The
+2,589,588,544-byte dense array remains resident. Each byte now represents density,
+with soil above 127.5 and air below it. Density is sampled at cell centers and
+encodes the vertical distance to the surface at 16 units/cm, clamped to 0–255.
+This retains sub-centimeter surface position within one byte; it is not a material
+ID or a Euclidean signed-distance field.
+
+Seeded smooth value noise at 4 m, 1.5 m and 0.55 m scales produces irregular
+humps and dips, with heights bounded to 4–60 cm above the slab's y=0 base.
+The vertical volume is now 64 cm deep to allow greater relief than the original
+32 cm prototype; voxel spacing remains 1 cm. Heights are not rounded to whole
+centimeters. Classical **marching cubes** interpolates the 127.5 isosurface from
+the density array. The preview samples on a **uniform 4 cm extraction grid**
+(`YARD_TERRAIN_MESH_STEP`), with shortened final intervals at volume boundaries.
+This keeps the whole-acre mesh manageable; the source volume still has 1 cm
+spacing. This is neither a full-resolution 1 cm mesh nor distance-based LOD.
+
+Adjacent cells share indexed vertices through a rolling edge cache. Normals
+come from the density gradient over the extraction spacing, interpolated across
+triangles for smooth lighting. The soil uses uniform **`#56341B`** sRGB albedo, converted to linear before
+lighting and exposure. The previous procedural color patches are absent.
+Brightness varies with surface orientation under directional sunlight and ambient
+sky lighting; terrain-cast shadows are not yet implemented. The
+mesh has 2,781,892 vertices and 5,557,104 triangles (127.3 MiB of GPU geometry)
+with static draw regions for frustum culling. There is no editing or physics.
+Temporary CPU mesh data is freed after upload. A roughly 154 MiB floating-point
+height cache remains for navigation. Startup generation and upload take several
+seconds.
+
+### Grass experiment
+
+Each surface voxel column carries **one upright triangle, 5 cm tall and 5 mm
+wide**, for **40,462,321 blades** over the acre. Roots are randomly placed within
+each centimeter cell's horizontal footprint (up to ±5 mm from its center in X/Z).
+Placement is deterministic, with an independent stable hash selecting azimuth.
+Root height still uses the cell-center density-derived surface height; both this
+and the coarser render mesh approximate the surface at the offset position. The blades are green
+and two-sided, with no wind, textures, alpha blending, or crossed billboards.
+Both sides receive sunlight in this simple thin-leaf shading model; grass does
+not cast shadows on the soil or other blades yet.
+
+Instanced draws reuse a single triangle. The existing navigation heights
+supply a 154.4 MiB immutable GPU root buffer; the vertex shader reconstructs X/Z
+and orientation from the region and instance ID. Visible regions retain full
+grass density, with no distance LOD. Very distant blades are
+subpixel in the 800×600 camera and can shimmer during movement.
+Randomized roots break up the regular rows of the original cell-centered placement. The initial
+full-acre moving-view check measured 17.1 captures/sec on M1 Max/32 GB, down from
+29.5 for bare terrain; the 30 fps cap is unchanged.
+
+### Cube baseline and optional grass volume LOD
+
+A light-gray **50 cm cube** sits at the yard center, with its base embedded 8 cm
+below the center's soil height. It uses the same sunlight/exposure and opaque depth
+testing as the terrain. It is visual geometry: it has no collision or cast shadow.
+
+Full triangle grass remains the default. **V** toggles the experimental shallow
+volume LOD without moving the camera; the title shows `blades` or `volume LOD`.
+`--grass-volume` enables it at startup. The existing **C** culling toggle still works.
 
 ```sh
-./build/yard --geometry-demo --date 2026-09-15 --time 12
-make geometry-bench
-./build/yard --tree quaking_aspen --date 2026-09-15 --time 12
-make tree-bench
+./build/yard --date 2026-09-14 --time 9 --eye-height 0.4
+./build/yard --date 2026-09-14 --time 9 --eye-height 0.4 --grass-volume
+# Bring the volume close to inspect where it meets the cube:
+./build/yard --date 2026-09-14 --time 9 --eye-height 0.4 --grass-volume --lod-start 0.5 --lod-end 1
 ```
 
-The demo adds a curved sweep and holed panel with UV checkers. The default cube
-also uses generated polygon meshes. Smoke mode includes all three and a fan palm; only the cube
-has an analytic ground shadow. `make test` includes CPU geometry and tree tests.
+The default transition is **3–6 m horizontal distance** from the camera. Within
+that band, blade widths smoothly narrow as the volume contribution increases.
+Draw regions entirely beyond the band stop submitting blades; nearby intersecting
+regions can still submit degenerate distant blades. `--lod-start` and `--lod-end`
+accept finite distances from 0 to 100 m, with end strictly greater than start.
+This first experiment uses distance thresholds, not automatic projected-size LOD.
+
+The replacement is a **5 cm density layer above a bilinear 4 cm height field**,
+ray-marched at the internal rendering resolution. Extinction derives from 10,000
+roots/m², 5 mm blade base width, a triangular height profile, and an approximate
+uniform azimuth distribution. Beer–Lambert transmittance combines the layer with
+the scene; leaf lighting averages 16 azimuths weighted by projected area under
+the current sun and ambient illumination. `--grass-stride` scales volume density,
+and `--no-grass` suppresses both representations.
+
+The scene stores linear HDR RGB and forward camera depth in RGBA16F. The volume
+stops at the nearest rendered terrain, cube or blade surface, so solid objects
+block grass behind them and grass in front can partially cover their lower edges.
+Compositing precedes exposure/tone mapping. The volume has no single opaque depth
+surface and does not participate in collision, shadows, or transparent-object sorting.
+With 4× MSAA, resolved depth is averaged at mixed-coverage edges; volume occlusion
+there is approximate. Default 8× SSAA with MSAA off avoids that depth resolve.
+
+The height texture uses about 9.7 MiB and the additional 2263×1698 RGBA16F target
+about 29.3 MiB. These resources stay allocated for instant toggling. Persistent
+voxels, grass roots and the existing GPU blade data remain unchanged.
+
+**Limits:** this is a smooth statistical layer, not filtered captures of actual
+blade arrangements. It loses individual distant silhouettes and fine density
+variation. The height field approximates the original roots and render mesh;
+transition coverage/lighting matching is approximate. Empty-space skipping uses
+a conservative height-slope bound, followed by <=1 cm integration steps in the
+layer. Marches stop at 1,024 steps or 0.2% transmission, so unusually long grazing
+paths may under-integrate. There is no wind or grass/cube shadowing.
+
+The final 120-capture orbit at 40 cm eye height on M1 Max/32 GB with 8× SSAA
+measured **28.4 captures/sec for the cube + blades baseline** and **29.5 with volume
+LOD**. Average submitted blades fell from **9.13 million to 0.66 million**;
+terrain submission stayed at 1.25 million triangles. These are end-to-end rates
+with a **30 fps cap**, not uncapped GPU timings.
+
+### Offscreen geometry culling
+
+Camera-frustum culling is enabled by default. **C** toggles it during a walk;
+`--no-culling` disables it at startup. The title shows the current setting.
+
+Terrain indices and grass heights are grouped into **625 static draw regions**,
+up to **2.56 m square** (256×256 columns). Each capture tests their axis-aligned
+bounds against the fixed sensor's six frustum planes and submits only intersecting
+regions. Terrain bounds include complete triangles that cross region boundaries;
+grass bounds include random root offsets, blade width and the full 5 cm height.
+The root hash still uses the original global voxel ID, preserving every blade's
+placement and orientation. Shared terrain vertices remain unchanged.
+
+This adds draw grouping, not streaming or persistent voxel chunks. Dense yard
+state and GPU geometry remain resident. It does not reject geometry hidden behind
+hills or blades, and intersecting regions may include some offscreen triangles.
+The packed height buffer has the same GPU size; its temporary CPU copy is freed
+after upload. Sensor FOV and preview zoom remain independent of culling.
+
+On M1 Max/32 GB, the 120-capture full-density orbit at 40 cm eye height with
+8× SSAA measured **27.4 captures/sec with culling**, versus **16.6 disabled**.
+Average submitted geometry fell from 40.46 to **9.13 million blades** and 5.56 to
+**1.25 million terrain triangles** (about 77% fewer). The disabled comparison
+retains the new grass draw grouping, so it includes its submission overhead.
+These are end-to-end measurements with a 30 fps cap, not GPU stage timings.
+
+```sh
+./build/yard --terrain-smoke-test --eye-height 0.4
+./build/yard --terrain-smoke-test --eye-height 0.4 --no-culling
+```
+
+### Spatial supersampling and rendering diagnostics
+
+The default **`--ssaa 8 --msaa 1`** renders at **2263×1698** internally for an
+800×600 camera, then area-filters into the final fixed **800×600 RGBA8** image.
+8× refers to approximately eight times the pixel count, not eight times each
+dimension. Each dimension is `ceil(sensor_dimension × sqrt(8))`; integer rounding
+accounts for the small difference from exactly 8×. The projection keeps the
+sensor's nominal aspect and FOV. Window resizing, Retina and preview zoom do not
+change either resolution.
+
+The area filter computes source-pixel overlap for each output pixel, including
+fractional footprints and image boundaries. Each source sample receives exposure/tone mapping, then is averaged in linear
+display light and encoded to sRGB. Scene radiance remains linear HDR RGBA16F
+through the optional grass volume composite. The
+scene is instantaneous: there is no jitter, frame history, or temporal blending.
+Filtering happens after tone mapping, so this is not a calibrated optical/sensor
+model. Small grass can still alias, although spatial sampling is denser.
+
+For comparisons:
+
+```sh
+./build/yard --terrain-smoke-test --eye-height 0.4 --no-culling --ssaa 8 --msaa 1
+./build/yard --terrain-smoke-test --eye-height 0.4 --no-culling --ssaa 1 --msaa 4
+./build/yard --terrain-smoke-test --eye-height 0.4 --no-culling --ssaa 1 --msaa 1
+```
+
+`--ssaa 1` uses the native camera size. `--msaa 4` can independently add four
+coverage samples at the internal rendering resolution, with a hardware resolve
+before downsampling. The primary 8× SSAA comparison disables MSAA to isolate
+spatial supersampling. The removed TAA experiment's T key and CLI switches are
+no longer active.
+
+`--no-grass` skips its draw while leaving data resident. `--grass-stride N` draws
+every Nth blade within each draw region (1–64, default 1), retaining the selected root and
+orientation. These are diagnostic density reductions, not automatic culling or
+LOD. Use the same orbit and avoid concurrent Yard instances for comparisons.
+The 30 fps capture cap remains, so fast configurations cannot report uncapped
+throughput. Startup/allocation time is excluded from the reported capture rate.
+
+Historical full-density grass measurements before culling/draw grouping on
+M1 Max/32 GB using the same 120-capture terrain orbit, excluding startup:
+
+| Rendering | Internal size | Captures/sec |
+|---|---|---:|
+| Native, no AA | 800×600 | 17.3 |
+| Native, 4× MSAA | 800×600 | 17.2 |
+| 8× SSAA, no MSAA | 2263×1698 | 17.3 |
+
+These runs show no meaningful throughput difference. The result is consistent
+with the earlier geometry bottleneck: supersampling increases pixel work, while
+the submitted 40.5 million grass triangles remain unchanged. These are end-to-end
+capture rates, not GPU stage timings or a guarantee for other scenes.
+
+For a daylight walk, or the low camera view used for the visual comparison:
+
+```sh
+./build/yard --date 2026-09-14 --time 9
+./build/yard --date 2026-09-14 --time 9 --eye-height 0.4
+```
+
+Click to capture the mouse, use WASD to walk, Shift to move faster, and Escape
+to release. The clock starts paused when `--time` is supplied. The viewer follows
+bilinearly interpolated heights recovered from the density field, without the
+previous 1 cm vertical jumps. The 4 cm render mesh approximates that field, so
+navigation is not an exact triangle collision query. Outside the square, the
+viewer follows the y=0 ground plane.
+
+The surface spans the outer cell centers (63.60 m); the perimeter and bottom
+are uncapped. There are no caves in this seed, terrain self-shadows,
+or photorealistic materials. Classic marching cubes does not guarantee correct
+topology for arbitrary ambiguous density configurations; this prototype is a
+smooth height field. Camera resolution, FOV, manual exposure, 800×600 output, and preview scaling
+retain their existing behavior.
+
+`./build/yard --terrain-smoke-test --eye-height 0.4` renders 120 frames along a
+scripted daytime orbit and exits. It reports observed capture cadence excluding
+startup; this is an execution/cadence check, not a GPU timing benchmark or a test
+of physical mouse/keyboard input. `make smoke-test` retains the lunar-phase check.
+`make test` covers interpolated plane accuracy and coverage, closed sphere edge
+connectivity, outward winding, normals, indices, density and navigation heights.
+The lookup tables are vendored from [PyMCubes](vendor/marching_cubes/README.md)
+under its accompanying BSD license; normal builds remain offline.
+
+## Generated objects
+
+The application now builds as C++20 alongside the merged geometry engine and
+tree-gen port. `--tree SPECIES` places a generated tree at the terrain surface;
+`--geometry-demo` adds the sweep and holed-panel examples. Trees, cube, terrain and
+grass all use the same HDR/depth, supersampling and optional volume-composite path.
+
+```sh
+./build/yard --tree quaking_aspen --date 2026-09-15 --time 12
+make tree-bench
+make geometry-bench
+```
+
+See [geometry](design/GEOMETRY.md) and [tree generation](design/TREES.md).
+The tree port is GPLv3; [NOTICE](NOTICE) and [COPYING](COPYING) preserve attribution
+and licensing for the combined application. Other vendored components retain
+their original licenses.
 
 ## Camera exposure
 
@@ -148,7 +371,7 @@ and gain steps for other cameras. The default stays OV2640 SVGA. See
 
 Night ambient uses David Lorenz's [2025 Light Pollution Atlas](https://djlorenz.github.io/astronomy/lp/).
 The bundled sample at the default coordinates has artificial zenith brightness
-**5.44× the natural sky** (6.44× total). Sky, ground, and cube share this light;
+**5.44× the natural sky** (6.44× total). Sky and terrain share this light;
 it fades out through astronomical twilight. The app remains offline.
 
 To use another location, download a site profile once with Python 3, then load it:
@@ -193,14 +416,14 @@ The solar disk, atmospheric extinction, and directional light share one sun
 position. Colors are lit in linear space, multiplied by camera shutter/gain, tone mapped, and
 converted to sRGB. Ambient skylight and distant ground haze are approximations;
 clouds, multiple scattering, stars, and photometric calibration are not implemented.
-The ground shadow uses an analytic intersection with the stationary demo cube;
-a general scene will need a scene shadow system. The sky integrates 16 view
+Terrain uses directional sunlight and ambient sky lighting, with no terrain
+self-shadowing or ambient occlusion yet. The sky integrates 16 view
 samples with eight sun samples each per fragment; a cached sky lookup texture
 is a possible optimization as the yard grows.
 
-- `src/main.cpp`: application lifecycle, geometry demo, rendering, and input.
-- `src/tree.cpp`: tree-gen algorithm, owned branch skeletons, and tree meshes.
-- `src/geometry.cpp`: curve sampling, profile sweeps, and polygon tessellation.
+- `src/main.cpp`: application lifecycle, rendering, and input.
+- `src/terrain.cpp`: dense centimeter density generation and height queries.
+- `src/marching_cubes.cpp`: interpolated surface extraction, shared vertices and gradient normals.
 - `src/astronomy.cpp`: sun/moon ephemeris and local calendar conversion.
 - `src/skyglow.cpp`: offline site profiles and location-dependent night lighting.
 - `src/camera.cpp`: camera profiles, manual exposure, and gain response.
@@ -211,7 +434,6 @@ is a possible optimization as the yard grows.
 - `build/generated/cube.glsl.h`: generated shader sources, uniform types, and
   binding declarations; do not edit or commit.
 - `tools/setup-shdc.sh`: explicit compiler download pinned by commit and SHA-256.
-- `vendor/earcut/`: unmodified Earcut v2.2.4 header, ISC license, and revision.
 - `vendor/sokol/`: Sokol headers and upstream license, pinned to commit
   `c0db757ea10cbe40aa8398aa378b2b5aae0278b2` (also recorded in `REVISION`).
 
