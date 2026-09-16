@@ -54,6 +54,8 @@ Use `--yard-demo --tree SPECIES` for the framed tree/grass preview; see
 This is static procedural morphology. Keeping the skeleton independent makes
 seasonal foliage, pruning tools and collision proxies possible future consumers;
 none of those systems, persistent growth, or a physics backend is implemented.
+Future species-specific roots, sapling development and persistent growth are
+outlined in [botanical growth notes](GROWTH_SYSTEM.md); these remain proposals.
 Generation-time envelope pruning is part of the imported algorithm and is distinct
 from a robot pruning a persistent tree.
 
