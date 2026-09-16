@@ -23,6 +23,30 @@ Implement in two stages, with tree generation consuming the geometry engine.
       Implemented all 20 presets, separate skeleton/foliage records, and mesh
       detail controls; see [Blender comparisons and measurements](design/TREES.md).
 
+## Trees
+
+Botanical fidelity is the priority: species identity should govern development,
+not just the mature silhouette. These are future tasks; see the initial
+[botanical growth and root research notes](design/GROWTH_SYSTEM.md).
+
+- [ ] Add realistic root support: species- and soil-dependent structural roots,
+      root collars/flare and smooth trunk junctions, exposed surface roots, and
+      below-ground branching. Distinguish visible woody roots from absorptive
+      roots; share persistent topology with growth and derive meshes/proxies.
+- [ ] Design and implement persistent growth from seedlings and saplings through
+      maturity, including buds, shoot/root extension, thickening, seasonal foliage,
+      resource allocation, dormancy, damage and mortality. Saplings should be
+      developmental stages, not uniformly scaled mature tree-gen meshes.
+- [ ] Build sourced species profiles for architecture, juvenile/adult traits,
+      phenology, rooting, shade tolerance and regeneration. Audit tree-gen preset
+      names against botanical taxa; track provenance, uncertainty and local
+      environmental suitability rather than treating presets as calibrated biology.
+- [ ] Model how foliage from neighboring trees, shrubs, grasses and other plants
+      affects growth amount and direction: self/neighbor shading, seasonal light
+      interception, directional responses, species-dependent shade avoidance and
+      tolerance, plus below-ground resource competition. Validate mixed-species
+      scenarios independently of rendering LOD, camera exposure and frame rate.
+
 ## Camera
 
 Keep the original XIAO ESP32-S3 Sense **OV2640 at 800×600 SVGA** as the
