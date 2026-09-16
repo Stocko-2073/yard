@@ -78,7 +78,95 @@ vec3 surface_light(vec3 albedo, vec3 normal, vec3 sun, vec3 sunlight, float visi
     ambient *= mix(0.3, 1.0, normal.y*0.5+0.5);
     return albedo * (ambient + sunlight * max(dot(normal, sun), 0.0) * visibility);
 }
+vec3 material_linear(vec3 srgb) {
+    return mix(srgb/12.92,pow((srgb+0.055)/1.055,vec3(2.4)),step(vec3(0.04045),srgb));
+}
+vec3 grass_albedo(vec2 world) {
+    float variation=0.5+0.25*sin(world.x*0.73+sin(world.y*0.39))+0.25*sin(world.y*0.61-world.x*0.27);
+    return mix(vec3(0.043,0.086,0.026),vec3(0.069,0.112,0.039),variation);
+}
+vec3 leaf_light(vec3 albedo,vec3 normal,vec3 sun,vec3 sunlight,float visibility,vec3 night) {
+    // Thin diffuse sheet: reflected front light plus attenuated rear transmission.
+    vec3 reflected=surface_light(albedo,normal,sun,sunlight,visibility,night);
+    return reflected+albedo*vec3(0.75,1.0,0.55)*sunlight*(0.35*max(-dot(normal,sun),0.0))*visibility;
+}
+
 @end
+
+// Fixed world-space light projection: camera motion cannot move the shadow grid.
+@block shadow_projection
+layout(binding=3) uniform shadow_params {
+    vec4 shadow_right;
+    vec4 shadow_up;
+    vec4 shadow_forward;
+    vec4 shadow_origin; // xyz center, w inverse half extent
+};
+vec3 shadow_project(vec3 world) {
+    vec3 p=(world-shadow_origin.xyz)*shadow_origin.w;
+    return vec3(dot(p,shadow_right.xyz),dot(p,shadow_up.xyz),dot(p,shadow_forward.xyz));
+}
+@end
+
+@block caster_projection
+layout(binding=3) uniform caster_params {
+    vec4 caster_right;
+    vec4 caster_up;
+    vec4 caster_forward;
+    vec4 caster_origin; // xyz center, w inverse half extent
+};
+vec3 caster_project(vec3 world) {
+    vec3 p=(world-caster_origin.xyz)*caster_origin.w;
+    return vec3(dot(p,caster_right.xyz),dot(p,caster_up.xyz),dot(p,caster_forward.xyz));
+}
+@end
+
+@block shadows
+@include_block shadow_projection
+layout(binding=4) uniform texture2D shadow_image;
+layout(binding=4) uniform sampler shadow_sampler;
+@image_sample_type shadow_image unfilterable_float
+@sampler_type shadow_sampler nonfiltering
+float sun_visibility(vec3 world, vec3 normal, vec3 sun) {
+    if(shadow_right.w<0.5 || sun.y<=0.0) return 1.0;
+    vec3 q=shadow_project(world + normal*0.012);
+    vec2 uv=q.xy*0.5+0.5;
+#ifndef SOKOL_GLSL
+    uv.y=1.0-uv.y;
+#endif
+    if (any(lessThan(uv,vec2(0))) || any(greaterThan(uv,vec2(1))) || abs(q.z)>1.0) return 1.0;
+    // A small slope-aware receiver bias in world metres, then a continuous tent PCF.
+    float bias=(0.008+0.025*(1.0-abs(dot(normal,sun))))*shadow_origin.w*0.5;
+    float depth=q.z*0.5+0.5-bias;
+    ivec2 size=textureSize(sampler2D(shadow_image,shadow_sampler),0);
+    vec2 pixel=uv*vec2(size)-0.5;
+    ivec2 base=ivec2(floor(pixel)); vec2 f=fract(pixel);
+    float visible=0.0, weights=0.0;
+    for(int y=-1;y<=2;++y) for(int x=-1;x<=2;++x) {
+        float w=max(0.0,2.0-abs(float(x)-f.x))*max(0.0,2.0-abs(float(y)-f.y));
+        float z=texelFetch(sampler2D(shadow_image,shadow_sampler),clamp(base+ivec2(x,y),ivec2(0),size-1),0).r;
+        visible+=w*step(depth,z); weights+=w;
+    }
+    return visible/weights;
+}
+@end
+
+@vs shadow_vs
+@glsl_options fixup_clipspace
+@include_block caster_projection
+in vec3 position;
+out float light_depth;
+void main() {
+    vec3 p=caster_project(position);
+    light_depth=p.z*0.5+0.5;
+    gl_Position=vec4(p.xy,light_depth,1.0);
+}
+@end
+@fs shadow_fs
+in float light_depth;
+out float frag_depth;
+void main() { frag_depth=light_depth; }
+@end
+@program shadow shadow_vs shadow_fs
 
 @block scene_view
 layout(binding=0) uniform vs_params {
@@ -121,6 +209,7 @@ layout(binding=1) uniform light_params {
 @fs fs
 @include_block scene_light
 @include_block lighting
+@include_block shadows
 in vec3 world_normal;
 in vec3 world_position;
 in float surface_depth;
@@ -130,7 +219,7 @@ void main() {
     // #56341B is an sRGB albedo; convert to linear before lighting.
     vec3 albedo = pow((vec3(86,52,27)/255.0+0.055)/1.055, vec3(2.4));
     frag_color = vec4(surface_light(albedo,n,sun_direction.xyz,
-                                   sun_color.xyz,1.0,night_radiance.xyz),surface_depth);
+                                   sun_color.xyz,sun_visibility(world_position,n,sun_direction.xyz),night_radiance.xyz),surface_depth);
 }
 @end
 
@@ -140,32 +229,39 @@ void main() {
 @include_block camera
 in vec3 position;
 in vec3 normal;
-in vec3 color;
+in vec4 color;
 in vec2 uv;
 out vec3 world_normal;
-out vec3 face_color;
+out vec4 face_color;
 out vec2 surface_uv;
+out vec3 object_position;
 out float surface_depth;
 void main() {
     vec3 p=transpose(camera_basis(view.xy))*(position-camera_position.xyz);
     gl_Position=vec4(lens.x*p.x/view.z,lens.x*p.y,(1000.0/999.9)*p.z-100.0/999.9,p.z);
-    world_normal=normal;face_color=color;surface_uv=uv;surface_depth=p.z;
+    object_position=position;world_normal=normal;face_color=color;surface_uv=uv;surface_depth=p.z;
 }
 @end
 @fs object_fs
 @include_block scene_light
 @include_block lighting
+@include_block shadows
 in vec3 world_normal;
-in vec3 face_color;
+in vec4 face_color;
 in vec2 surface_uv;
+in vec3 object_position;
 in float surface_depth;
 out vec4 frag_color;
 void main() {
     vec3 n=normalize(world_normal)*(gl_FrontFacing ? 1.0 : -1.0);
     float checker=mod(floor(surface_uv.x*8.0)+floor(surface_uv.y*8.0),2.0);
-    vec3 albedo=pow(face_color,vec3(2.2))*mix(1.0,0.8,checker);
+    vec3 albedo=material_linear(face_color.rgb)*mix(1.0,0.8,checker);
     // Keep linear radiance and forward depth for grass-volume occlusion.
-    frag_color=vec4(surface_light(albedo,n,sun_direction.xyz,sun_color.xyz,1.0,night_radiance.xyz),surface_depth);
+    float visibility=sun_visibility(object_position,n,sun_direction.xyz);
+    vec3 lit=face_color.a>0.5
+        ? leaf_light(albedo,n,sun_direction.xyz,sun_color.xyz,visibility,night_radiance.xyz)
+        : surface_light(albedo,n,sun_direction.xyz,sun_color.xyz,visibility,night_radiance.xyz);
+    frag_color=vec4(lit,surface_depth);
 }
 @end
 @program object object_vs object_fs
@@ -302,6 +398,7 @@ in vec2 blade;
 in float root_height;
 out vec3 grass_normal;
 out float grass_depth;
+out vec3 grass_position;
 uint grass_hash(uint seed) {
     uint h = seed*747796405u+2891336453u;
     h = ((h >> ((h >> 28u)+4u)) ^ h)*277803737u;
@@ -328,7 +425,7 @@ void main() {
     gl_Position = vec4(lens.x*p.x/view.z,lens.x*p.y,
                        (1000.0/999.9)*p.z-100.0/999.9,p.z);
     grass_normal = vec3(-axis.y,0,axis.x);
-    grass_depth=p.z;
+    grass_depth=p.z;grass_position=world;
     if (lod>=1.0) gl_Position=vec4(2,2,2,1);
 }
 @end
@@ -336,16 +433,16 @@ void main() {
 @fs grass_fs
 @include_block scene_light
 @include_block lighting
+@include_block shadows
 in vec3 grass_normal;
 in float grass_depth;
+in vec3 grass_position;
 out vec4 frag_color;
 void main() {
-    vec3 n = normalize(grass_normal);
-    // Thin, two-sided leaf: either face can receive the directional light.
-    if (dot(n,sun_direction.xyz) < 0.0) n = -n;
-    vec3 albedo = vec3(0.075,0.16,0.025);
-    frag_color = vec4(surface_light(albedo,n,sun_direction.xyz,
-                        sun_color.xyz,1.0,night_radiance.xyz),grass_depth);
+    vec3 n=normalize(grass_normal)*(gl_FrontFacing ? 1.0 : -1.0);
+    vec3 albedo=grass_albedo(grass_position.xz);
+    frag_color=vec4(leaf_light(albedo,n,sun_direction.xyz,sun_color.xyz,
+        sun_visibility(grass_position,n,sun_direction.xyz),night_radiance.xyz),grass_depth);
 }
 @end
 
@@ -404,6 +501,7 @@ layout(binding=7) uniform volume_camera_params {
 };
 @include_block scene_light
 @include_block lighting
+@include_block shadows
 layout(binding=6) uniform volume_params {
     vec4 volume_field; // first sample X/Z, sample spacing, size, global slope bound
     vec4 volume_bounds; // min root height, max tip height, yard half-width, reserved
@@ -452,16 +550,19 @@ void main() {
         !clip_axis(volume_camera_position.z,ray.z,-volume_bounds.z,volume_bounds.z,enter,leave) ||
         !clip_axis(volume_camera_position.y,ray.y,volume_bounds.x,volume_bounds.y,enter,leave)) return;
     // Average the original two-sided upright leaf lighting, weighted by projected area.
-    vec3 leaf=vec3(0); float weights=0;
+    vec3 direct=vec3(0), ambient=vec3(0); float weights=0;
     for (int i=0; i<16; ++i) {
         float angle=(float(i)+0.5)*PI/16.0;
         vec3 n=vec3(cos(angle),0,sin(angle));
         float w=abs(dot(n,ray));
-        if (dot(n,sun_direction.xyz)<0) n=-n;
-        leaf+=w*surface_light(vec3(0.075,0.16,0.025),n,sun_direction.xyz,sun_color.xyz,1.0,night_radiance.xyz);
+        if (dot(n,ray)>0) n=-n;
+        ambient+=w*leaf_light(vec3(1),n,sun_direction.xyz,vec3(0),1.0,night_radiance.xyz);
+        direct+=w*leaf_light(vec3(1),n,sun_direction.xyz,sun_color.xyz,1.0,vec3(0));
+        direct-=w*leaf_light(vec3(1),n,sun_direction.xyz,vec3(0),1.0,vec3(0));
         weights+=w;
     }
-    leaf/=max(weights,1e-6);
+    direct/=max(weights,1e-6);ambient/=max(weights,1e-6);
+    vec3 accumulated=vec3(0);
     float t=enter, transmission=1.0;
     float rate=abs(ray.y)+volume_field.w*horizontal;
     // Conservative empty-space steps from the bilinear field's global slope bound.
@@ -482,11 +583,15 @@ void main() {
             float lod=smoothstep(volume_grass_lod.y,volume_grass_lod.z,length(midpoint.xz-volume_camera_position.xz));
             // 10,000 roots/m² * 5 mm base width * triangular width profile * mean projected azimuth.
             float sigma=50.0*(1.0-height/0.05)*(2.0/PI)*horizontal*lod*volume_grass_lod.w;
-            transmission*=exp(-sigma*step_length);
+            float segment=exp(-sigma*step_length);
+            float visibility=sun_visibility(midpoint,vec3(0,1,0),sun_direction.xyz);
+            vec3 leaf=grass_albedo(midpoint.xz)*(ambient+direct*visibility);
+            accumulated+=transmission*(1.0-segment)*leaf;
+            transmission*=segment;
         }
         t+=step_length;
     }
-    frag_color=vec4(leaf*(1.0-transmission)+scene.rgb*transmission,scene.a);
+    frag_color=vec4(accumulated+scene.rgb*transmission,scene.a);
 }
 @end
 @program volume preview_vs volume_fs

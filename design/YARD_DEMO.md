@@ -10,14 +10,15 @@ C toggles frustum culling. All three controls work while time is paused.
 The tree's world root is (0, terrain height − 0.02 m, −6). Wood, leaves, cube,
 soil and grass share the camera, manual exposure, sunlight, ambient lighting,
 HDR render target and depth buffer. There is no rigid-body collision, wind,
-growth or general shadow pass. Root embedding hides small extraction/interpolation
+or growth. Objects cast sun shadows; terrain and grass receive them. Root embedding hides small extraction/interpolation
 discrepancies; it does not deform terrain or remove grass under the trunk.
 The half-metre cube remains as PR #7's occlusion reference. `--geometry-demo`
 adds the curve and polygon examples to the same renderer.
 
-![Daytime aspen in the grassy terrain](yard-demo.png)
+![Daytime aspen with revised materials and sun shadows](yard-demo.png)
 
-Earlier scene preview; this image predates the restored supersampling.
+Paused at 2026-09-15 12:00 local time, with 8× SSAA and blade grass.
+See [materials and shading](MATERIALS.md) for the palette and shadow model.
 
 ## Restored renderer from PR #7
 

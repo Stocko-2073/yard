@@ -21,8 +21,10 @@ The demo uses seed 123 and places one full-sized tree at the terrain surface bey
 the half-metre reference cube. The
 camera remains fixed at SVGA, with the existing projection and manual exposure.
 Foliage renders from both sides, with the facing normal used for lighting.
-Tree shadows, textures, translucency, wind and automatic scene framing are not
-implemented. There is currently no scene shadow pass in the terrain renderer.
+Foliage adds diffuse rear transmission, and tree geometry casts and receives sun
+shadows. Aspen bark has a pale gray palette; other presets retain muted brown bark.
+Textures, wind and automatic species framing are not implemented. See
+[materials and shading](MATERIALS.md) for the approximation limits.
 Smoke mode includes a fan palm; it verifies execution, not visual appearance.
 
 The shared renderer defaults to 8× spatial supersampling and supports optional

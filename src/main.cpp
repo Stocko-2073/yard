@@ -47,6 +47,11 @@ static struct {
     bool geometry_demo, yard_demo;
     int object_index_count;
     sg_pipeline object_pipeline;
+    sg_pipeline shadow_pipeline;
+    sg_attachments shadow_attachments;
+    sg_bindings shadow_bindings;
+    float shadow_extent;
+    bool no_shadows;
     sg_bindings object_bindings;
     sg_pipeline grass_pipeline;
     sg_bindings grass_bindings;
@@ -95,15 +100,17 @@ static void sunlight(const double direction[3], float color[4], double intensity
 
 static void make_objects() {
     using namespace yard::geometry;
-    struct RenderVertex { Vertex geometry; Vec3 color; };
+    struct RenderVertex { Vertex geometry; std::array<float,4> color; };
     std::vector<RenderVertex> vertices;
     std::vector<uint32_t> indices;
-    auto append = [&](Mesh mesh, Vec3 color, Vec3 offset, bool checker=false) {
+    auto append = [&](Mesh mesh, Vec3 color, Vec3 offset, bool checker=false, bool foliage=false) {
         auto base = static_cast<uint32_t>(vertices.size());
         for (auto vertex : mesh.vertices) {
             vertex.position.x += offset.x; vertex.position.y += offset.y; vertex.position.z += offset.z;
             if (!checker) vertex.uv = {0,0};
-            vertices.push_back({vertex,color});
+            vertices.push_back({vertex,{color.x,color.y,color.z,foliage ? 1.0f : 0.0f}});
+            const auto& p=vertex.position;
+            state.shadow_extent=fmaxf(state.shadow_extent,sqrtf(p.x*p.x+(p.y-10)*(p.y-10)+(p.z+6)*(p.z+6))+2);
         }
         for (auto i : mesh.indices) indices.push_back(base+i);
     };
@@ -126,9 +133,10 @@ static void make_objects() {
         auto skeleton=yard::tree::generate(yard::tree::preset(state.tree_species ? state.tree_species : "fan_palm"),123);
         auto tree=yard::tree::mesh(skeleton);
         Vec3 root{0,yard_terrain_height(&state.terrain,0,-6)-.02f,-6};
-        append(std::move(tree.wood),{.40f,.27f,.16f},root);
-        append(std::move(tree.leaves),{.23f,.46f,.13f},root);
-        append(std::move(tree.blossoms),{.95f,.65f,.75f},root);
+        const bool aspen=state.tree_species && strcmp(state.tree_species,"quaking_aspen")==0;
+        append(std::move(tree.wood),aspen ? Vec3{.62f,.63f,.57f} : Vec3{.36f,.30f,.23f},root);
+        append(std::move(tree.leaves),{.30f,.40f,.20f},root,false,true);
+        append(std::move(tree.blossoms),{.85f,.62f,.68f},root,false,true);
     }
     state.object_index_count=static_cast<int>(indices.size());
     sg_buffer_desc buffer{};
@@ -144,7 +152,7 @@ static void make_objects() {
     pipeline.layout.attrs[ATTR_object_position].offset=offsetof(RenderVertex,geometry)+offsetof(Vertex,position);
     pipeline.layout.attrs[ATTR_object_normal].format=SG_VERTEXFORMAT_FLOAT3;
     pipeline.layout.attrs[ATTR_object_normal].offset=offsetof(RenderVertex,geometry)+offsetof(Vertex,normal);
-    pipeline.layout.attrs[ATTR_object_color].format=SG_VERTEXFORMAT_FLOAT3;
+    pipeline.layout.attrs[ATTR_object_color].format=SG_VERTEXFORMAT_FLOAT4;
     pipeline.layout.attrs[ATTR_object_color].offset=offsetof(RenderVertex,color);
     pipeline.layout.attrs[ATTR_object_uv].format=SG_VERTEXFORMAT_FLOAT2;
     pipeline.layout.attrs[ATTR_object_uv].offset=offsetof(RenderVertex,geometry)+offsetof(Vertex,uv);
@@ -155,10 +163,70 @@ static void make_objects() {
     pipeline.colors[0].pixel_format=SG_PIXELFORMAT_RGBA16F;pipeline.sample_count=state.msaa;
     pipeline.label="opaque scene objects";
     state.object_pipeline=sg_make_pipeline(pipeline);
+    sg_pipeline_desc shadow{};
+    shadow.shader=sg_make_shader(shadow_shader_desc(sg_query_backend()));
+    shadow.layout.buffers[0].stride=sizeof(RenderVertex);
+    shadow.layout.attrs[ATTR_shadow_position].format=SG_VERTEXFORMAT_FLOAT3;
+    shadow.layout.attrs[ATTR_shadow_position].offset=offsetof(RenderVertex,geometry)+offsetof(Vertex,position);
+    shadow.index_type=SG_INDEXTYPE_UINT32;
+    shadow.cull_mode=SG_CULLMODE_NONE; // Leaves cast from both sides.
+    shadow.depth.pixel_format=SG_PIXELFORMAT_DEPTH;
+    shadow.depth.write_enabled=true;shadow.depth.compare=SG_COMPAREFUNC_LESS_EQUAL;
+    shadow.colors[0].pixel_format=SG_PIXELFORMAT_R32F;shadow.sample_count=1;
+    shadow.label="sun shadow casters";
+    state.shadow_pipeline=sg_make_pipeline(shadow);
+    state.shadow_bindings=state.object_bindings;
     if(sg_query_pipeline_state(state.object_pipeline)!=SG_RESOURCESTATE_VALID ||
        sg_query_buffer_state(state.object_bindings.vertex_buffers[0])!=SG_RESOURCESTATE_VALID ||
        sg_query_buffer_state(state.object_bindings.index_buffer)!=SG_RESOURCESTATE_VALID)
         throw std::runtime_error("Cannot upload scene objects");
+}
+
+static void make_shadows() {
+    constexpr int resolution=4096;
+    state.shadow_extent=fmaxf(52.0f,state.shadow_extent);
+    sg_image_desc desc{};
+    desc.width=resolution;desc.height=resolution;desc.sample_count=1;
+    desc.pixel_format=SG_PIXELFORMAT_R32F;desc.usage.color_attachment=true;
+    desc.label="sun shadow depth values";
+    sg_image color=sg_make_image(desc);
+    desc.usage={};desc.usage.depth_stencil_attachment=true;
+    desc.pixel_format=SG_PIXELFORMAT_DEPTH;desc.label="sun shadow depth test";
+    sg_image depth=sg_make_image(desc);
+    sg_view_desc view{};view.color_attachment.image=color;
+    state.shadow_attachments.colors[0]=sg_make_view(view);
+    view={};view.depth_stencil_attachment.image=depth;
+    state.shadow_attachments.depth_stencil=sg_make_view(view);
+    view={};view.texture.image=color;
+    sg_view texture=sg_make_view(view);
+    sg_sampler_desc sampler_desc{};
+    sampler_desc.wrap_u=SG_WRAP_CLAMP_TO_EDGE;sampler_desc.wrap_v=SG_WRAP_CLAMP_TO_EDGE;
+    sg_sampler sampler=sg_make_sampler(sampler_desc);
+    for(sg_bindings* bindings : {&state.bindings,&state.object_bindings,&state.grass_bindings,&state.volume_bindings}) {
+        bindings->views[VIEW_shadow_image]=texture;
+        bindings->samplers[SMP_shadow_sampler]=sampler;
+    }
+    if(sg_query_image_state(color)!=SG_RESOURCESTATE_VALID ||
+       sg_query_image_state(depth)!=SG_RESOURCESTATE_VALID ||
+       sg_query_pipeline_state(state.shadow_pipeline)!=SG_RESOURCESTATE_VALID)
+        throw std::runtime_error("Cannot create sun shadow map");
+    printf("Yard: %dx%d sun shadows, %.1f m half extent, two-sided object casters\n",resolution,resolution,state.shadow_extent);
+}
+
+static shadow_params_t shadow_projection(const float* sun) {
+    // Orthonormal light axes; fixed center/extent, independent of viewer/culling.
+    const float length=hypotf(sun[0],sun[2]);
+    shadow_params_t p{};
+    if(length>0.0001f) {p.shadow_right[0]=-sun[2]/length;p.shadow_right[2]=sun[0]/length;}
+    else p.shadow_right[0]=1;
+    for(int i=0;i<3;++i) p.shadow_forward[i]=-sun[i];
+    const float* f=p.shadow_forward; const float* r=p.shadow_right;
+    p.shadow_up[0]=f[1]*r[2]-f[2]*r[1];
+    p.shadow_up[1]=f[2]*r[0]-f[0]*r[2];
+    p.shadow_up[2]=f[0]*r[1]-f[1]*r[0];
+    p.shadow_right[3]=state.no_shadows ? 0.0f : 1.0f;
+    p.shadow_origin[1]=10;p.shadow_origin[2]=-6;p.shadow_origin[3]=1.0f/state.shadow_extent;
+    return p;
 }
 
 static void make_grass_volume(void) {
@@ -423,6 +491,7 @@ static void init(void) {
     grass_pipeline.layout.attrs[ATTR_grass_root_height].buffer_index = 1;
     grass_pipeline.layout.attrs[ATTR_grass_root_height].format = SG_VERTEXFORMAT_FLOAT;
     grass_pipeline.cull_mode = SG_CULLMODE_NONE;
+    grass_pipeline.face_winding = SG_FACEWINDING_CCW;
     grass_pipeline.depth.pixel_format = SG_PIXELFORMAT_DEPTH;
     grass_pipeline.depth.write_enabled = true;
     grass_pipeline.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
@@ -457,6 +526,8 @@ static void init(void) {
     terrain_pipeline.sample_count = state.msaa;
     terrain_pipeline.label = "voxel terrain pipeline";
     state.pipeline = sg_make_pipeline(terrain_pipeline);
+    try { make_shadows(); }
+    catch(const std::exception& e) {fprintf(stderr,"Shadow initialization failed: %s\n",e.what());exit(EXIT_FAILURE);}
 }
 
 static void frame(void) {
@@ -545,6 +616,22 @@ static void frame(void) {
             sky.moon_north[i] = (float)state.ephemeris.celestial_north[i];
         }
         sky.sky_moon[3] = (float)state.ephemeris.moon_radius;
+        const shadow_params_t shadow=shadow_projection(light.sun_direction);
+        sg_pass shadow_pass{};
+        shadow_pass.attachments=state.shadow_attachments;
+        shadow_pass.action.colors[0].load_action=SG_LOADACTION_CLEAR;
+        shadow_pass.action.colors[0].clear_value={1,1,1,1};
+        sg_begin_pass(shadow_pass);
+        if(!state.no_shadows && light.sun_direction[1]>0) {
+            sg_apply_pipeline(state.shadow_pipeline);
+            sg_apply_bindings(&state.shadow_bindings);
+            caster_params_t caster{};
+            static_assert(sizeof(caster)==sizeof(shadow));
+            memcpy(&caster,&shadow,sizeof(caster));
+            sg_apply_uniforms(UB_caster_params,SG_RANGE(caster));
+            sg_draw(0,state.object_index_count,1);
+        }
+        sg_end_pass();
         sg_pass camera_pass{};
         camera_pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
         camera_pass.action.colors[0].clear_value.r = .055f;
@@ -561,6 +648,7 @@ static void frame(void) {
         sg_apply_bindings(&state.bindings);
         sg_apply_uniforms(UB_vs_params, SG_RANGE(uniforms));
         sg_apply_uniforms(UB_light_params, SG_RANGE(light));
+        sg_apply_uniforms(UB_shadow_params,SG_RANGE(shadow));
         yard_frustum frustum;
         yard_frustum_make(&frustum,state.position,state.yaw,state.pitch,
                           uniforms.view[2],uniforms.lens[0]);
@@ -578,11 +666,13 @@ static void frame(void) {
         sg_apply_bindings(&state.object_bindings);
         sg_apply_uniforms(UB_vs_params,SG_RANGE(uniforms));
         sg_apply_uniforms(UB_light_params,SG_RANGE(light));
+        sg_apply_uniforms(UB_shadow_params,SG_RANGE(shadow));
         sg_draw(0,state.object_index_count,1);
         if (state.grass_count > 0 && !state.no_grass) {
             sg_apply_pipeline(state.grass_pipeline);
             sg_apply_uniforms(UB_vs_params, SG_RANGE(uniforms));
             sg_apply_uniforms(UB_light_params, SG_RANGE(light));
+            sg_apply_uniforms(UB_shadow_params,SG_RANGE(shadow));
             for (int i=0; i<state.layout.count; ++i) {
                 const yard_draw_region *r=&state.layout.regions[i];
                 if (!state.no_culling && !yard_frustum_visible(&frustum,&r->grass)) continue;
@@ -617,6 +707,7 @@ static void frame(void) {
             sg_apply_uniforms(UB_volume_camera_params,SG_RANGE(camera));
             sg_apply_uniforms(UB_volume_params,SG_RANGE(state.volume_params));
             sg_apply_uniforms(UB_light_params,SG_RANGE(light));
+            sg_apply_uniforms(UB_shadow_params,SG_RANGE(shadow));
             sg_draw(0,3,1);
             sg_end_pass();
             state.downsample_bindings.views[VIEW_source_image]=state.volume_texture;
@@ -695,6 +786,7 @@ static void event(const sapp_event *ev) {
         yard_camera_step_gain(&state.camera, ev->key_code == SAPP_KEYCODE_EQUAL ? 1 : -1);
         state.title_minute = INT64_MIN;
     }
+    if (ev->key_code == SAPP_KEYCODE_H) state.no_shadows=!state.no_shadows;
     if (ev->key_code == SAPP_KEYCODE_G) {
         state.no_grass=!state.no_grass;
         state.title_minute=INT64_MIN;
@@ -768,6 +860,8 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     double exposure_ms = -1, gain = -1, exposure_lines = -1, gain_index = -1;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--smoke-test") == 0) state.smoke_test = true;
+        else if (strcmp(argv[i], "--paused") == 0) state.paused=true;
+        else if (strcmp(argv[i], "--no-shadows") == 0) state.no_shadows=true;
         else if (strcmp(argv[i], "--yard-demo") == 0) state.yard_demo=true;
         else if (strcmp(argv[i], "--yard-smoke-test") == 0) {state.yard_demo=true;state.terrain_smoke_test=true;}
         else if (strcmp(argv[i], "--terrain-smoke-test") == 0) state.terrain_smoke_test = true;
@@ -892,7 +986,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
 usage:
     fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--eye-height metres] [--smoke-test | --terrain-smoke-test] [--site profile] [--tree species] [--geometry-demo] [--yard-demo | --yard-smoke-test]\n"
                     "Grass LOD: [--grass-volume] [--lod-start metres] [--lod-end metres] (V toggles volume, G toggles grass)\n"
-                    "Rendering: [--ssaa 1|8] [--msaa 1|4] [--no-culling] [--no-grass] [--grass-stride 1..64] (diagnostic density reduction)\n"
+                    "Rendering: [--ssaa 1|8] [--msaa 1|4] [--no-shadows] [--paused] (H toggles shadows) [--no-culling] [--no-grass] [--grass-stride 1..64] (diagnostic density reduction)\n"
                     "Camera: [--camera-profile FILE] [--exposure-ms MS | --aec-value LINES] [--gain MULTIPLIER | --agc-gain INDEX]\n"
                     "OV2640 default: manual shutter 0-33.333333 ms (AEC 0-1200, frame-capped), gain 1-31x (index 0-30).\n"
                     "Keys: comma/period = shutter -/+ 1/3 stop; minus/equal = gain -/+ one step.\n"

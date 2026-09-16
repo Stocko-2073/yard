@@ -158,7 +158,7 @@ full-acre moving-view check measured 17.1 captures/sec on M1 Max/32 GB, down fro
 
 A light-gray **50 cm cube** sits at the yard center, with its base embedded 8 cm
 below the center's soil height. It uses the same sunlight/exposure and opaque depth
-testing as the terrain. It is visual geometry: it has no collision or cast shadow.
+testing as the terrain. It casts a sun shadow, but has no collision.
 
 Full triangle grass remains the default. **V** toggles the experimental shallow
 volume LOD without moving the camera; the title shows `blades` or `volume LOD`.
@@ -190,7 +190,8 @@ The scene stores linear HDR RGB and forward camera depth in RGBA16F. The volume
 stops at the nearest rendered terrain, cube or blade surface, so solid objects
 block grass behind them and grass in front can partially cover their lower edges.
 Compositing precedes exposure/tone mapping. The volume has no single opaque depth
-surface and does not participate in collision, shadows, or transparent-object sorting.
+surface and does not participate in collision, shadow casting, or transparent-object sorting.
+It receives object sun shadows during integration.
 With 4× MSAA, resolved depth is averaged at mixed-coverage edges; volume occlusion
 there is approximate. Default 8× SSAA with MSAA off avoids that depth resolve.
 
@@ -204,7 +205,7 @@ variation. The height field approximates the original roots and render mesh;
 transition coverage/lighting matching is approximate. Empty-space skipping uses
 a conservative height-slope bound, followed by <=1 cm integration steps in the
 layer. Marches stop at 1,024 steps or 0.2% transmission, so unusually long grazing
-paths may under-integrate. There is no wind or grass/cube shadowing.
+paths may under-integrate. There is no wind or grass shadow casting; objects cast shadows onto the layer.
 
 The final 120-capture orbit at 40 cm eye height on M1 Max/32 GB with 8× SSAA
 measured **28.4 captures/sec for the cube + blades baseline** and **29.5 with volume
@@ -360,7 +361,11 @@ the soil and trunk contact; `--no-grass` starts with soil exposed. WASD and mous
 look work as usual, and the camera follows the surface at 1.6 m eye height.
 The tree is planted at the terrain height, with its base embedded 2 cm.
 
-This is a static preview, with no collision, growth, or tree/terrain shadows.
+This is a static preview, with no collision or growth. Trees and the cube now cast
+sun shadows onto themselves, terrain, blades and the grass volume. **H** toggles
+shadows; `--no-shadows` disables them at startup. `--paused` holds the initial
+clock for comparisons (Space resumes). See [materials and shading](design/MATERIALS.md)
+for the revised palette, thin-leaf transmission, and shadow limitations.
 The dense 1 cm × 64 cm terrain volume alone uses about 2.4 GiB, so startup takes
 several seconds. Frustum culling submits visible 2.56 m draw regions. This mode uses the same restored 8× supersampling, configurable MSAA, and
 optional grass-volume LOD as the terrain renderer. **V** toggles volume LOD and
