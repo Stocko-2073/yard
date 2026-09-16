@@ -1,5 +1,24 @@
 # TODO
 
+## Procedural geometry and trees
+
+Implement in two stages, with tree generation consuming the geometry engine.
+
+- [ ] Build a geometry engine that converts higher-level primitives, similar to
+      Blender's curves, beveled/swept profiles, and polygon surfaces, into indexed
+      triangle meshes with normals and UVs for Yard's renderer. First research
+      performant open-source solutions we could reuse; compare primitive support,
+      mesh quality, tessellation controls, generation time, memory use, licensing,
+      and C++/macOS integration. Keep the geometry engine independent of tree
+      generation and expose detail controls suitable for producing LOD meshes.
+- [ ] Port [tree-gen](https://github.com/friggog/tree-gen)'s generation algorithm
+      and species presets to C++ against that geometry engine, replacing Blender
+      geometry operations. Preserve its GPLv3 license and attribution. Compare
+      representative species against Blender output and measure generation time
+      and mesh size. Keep the branch skeleton separate from render meshes so
+      seasonal foliage, pruning, and collision representations can build on it;
+      persistent biological growth remains additional work.
+
 ## Camera
 
 Keep the original XIAO ESP32-S3 Sense **OV2640 at 800×600 SVGA** as the
