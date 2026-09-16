@@ -17,15 +17,20 @@ make tree-bench
 make test
 ```
 
-Use `--yard-demo --tree SPECIES` to place the tree in the grassy terrain; see
-[yard integration](YARD_DEMO.md).
-
-The sky demo uses seed 123 and places one full-sized tree beyond the cube. The
+The demo uses seed 123 and places one full-sized tree at the terrain surface beyond
+the half-metre reference cube. The
 camera remains fixed at SVGA, with the existing projection and manual exposure.
 Foliage renders from both sides, with the facing normal used for lighting.
 Tree shadows, textures, translucency, wind and automatic scene framing are not
-implemented. The existing analytic ground shadow still belongs only to the cube.
+implemented. There is currently no scene shadow pass in the terrain renderer.
 Smoke mode includes a fan palm; it verifies execution, not visual appearance.
+
+The shared renderer defaults to 8× spatial supersampling and supports optional
+grass-volume LOD; see the README. Fixed SVGA refers to the final camera image,
+not the internal rendering resolution.
+
+Use `--yard-demo --tree SPECIES` for the framed tree/grass preview; see
+[yard integration](YARD_DEMO.md).
 
 ## Skeleton and meshes
 

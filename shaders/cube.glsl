@@ -1,20 +1,3 @@
-@block scene_view
-layout(binding=0) uniform vs_params {
-    vec4 view; // yaw, pitch, aspect, cube angle
-    vec4 lens; // projection scale
-    vec4 camera_position;
-};
-@end
-
-@block scene_light
-layout(binding=1) uniform light_params {
-    vec4 sun_direction;
-    vec4 sun_color;
-    vec4 night_radiance;
-    vec4 camera_exposure; // shutter * gain / reference exposure
-};
-@end
-
 @block camera
 // Camera at yard eye height. North is -Z, east is +X.
 mat3 camera_basis(vec2 look) {
@@ -97,48 +80,95 @@ vec3 surface_light(vec3 albedo, vec3 normal, vec3 sun, vec3 sunlight, float visi
 }
 @end
 
+@block scene_view
+layout(binding=0) uniform vs_params {
+    vec4 view; // yaw, pitch, aspect, reserved
+    vec4 lens; // projection scale, terrain column count, grass instance stride
+    vec4 camera_position;
+    vec4 grass_lod; // enabled, fade start/end metres (horizontal), density scale
+};
+@end
+
 @vs vs
 @glsl_options fixup_clipspace
 @include_block scene_view
 @include_block camera
 in vec3 position;
-in vec3 color;
 in vec3 normal;
-in vec2 uv;
-out vec3 face_color;
-out vec3 world_position;
 out vec3 world_normal;
-out vec2 surface_uv;
+out vec3 world_position;
+out float surface_depth;
 void main() {
-    float c = cos(view.w), s = sin(view.w);
-    world_position = vec3(c*position.x+s*position.z, position.y+1.0,
-                          -s*position.x+c*position.z);
+    world_position = position;
     vec3 p = transpose(camera_basis(view.xy)) * (world_position - camera_position.xyz);
     // Forward-positive camera coordinates; depth [0, 1].
     gl_Position = vec4(lens.x*p.x/view.z, lens.x*p.y,
                       (1000.0/999.9)*p.z - 100.0/999.9, p.z);
-    face_color = color;
-    world_normal = vec3(c*normal.x+s*normal.z, normal.y, -s*normal.x+c*normal.z);
-    surface_uv = uv;
+    world_normal = normal;
+    surface_depth = p.z;
 }
+@end
+
+@block scene_light
+layout(binding=1) uniform light_params {
+    vec4 sun_direction;
+    vec4 sun_color;
+    vec4 night_radiance;
+    vec4 camera_exposure; // shutter * gain / reference exposure
+};
 @end
 
 @fs fs
 @include_block scene_light
 @include_block lighting
-in vec3 face_color;
-in vec3 world_position;
 in vec3 world_normal;
-in vec2 surface_uv;
+in vec3 world_position;
+in float surface_depth;
 out vec4 frag_color;
 void main() {
-    vec3 n = normalize(world_normal) * (gl_FrontFacing ? 1.0 : -1.0);
-    float checker = mod(floor(surface_uv.x*8.0)+floor(surface_uv.y*8.0), 2.0);
-    vec3 albedo = pow(face_color, vec3(2.2)) * mix(1.0, 0.8, checker);
-    frag_color = vec4(display_color(surface_light(albedo, n, sun_direction.xyz,
-                                                sun_color.xyz, 1.0, night_radiance.xyz), camera_exposure.x), 1);
+    vec3 n = normalize(world_normal);
+    // #56341B is an sRGB albedo; convert to linear before lighting.
+    vec3 albedo = pow((vec3(86,52,27)/255.0+0.055)/1.055, vec3(2.4));
+    frag_color = vec4(surface_light(albedo,n,sun_direction.xyz,
+                                   sun_color.xyz,1.0,night_radiance.xyz),surface_depth);
 }
 @end
+
+@vs object_vs
+@glsl_options fixup_clipspace
+@include_block scene_view
+@include_block camera
+in vec3 position;
+in vec3 normal;
+in vec3 color;
+in vec2 uv;
+out vec3 world_normal;
+out vec3 face_color;
+out vec2 surface_uv;
+out float surface_depth;
+void main() {
+    vec3 p=transpose(camera_basis(view.xy))*(position-camera_position.xyz);
+    gl_Position=vec4(lens.x*p.x/view.z,lens.x*p.y,(1000.0/999.9)*p.z-100.0/999.9,p.z);
+    world_normal=normal;face_color=color;surface_uv=uv;surface_depth=p.z;
+}
+@end
+@fs object_fs
+@include_block scene_light
+@include_block lighting
+in vec3 world_normal;
+in vec3 face_color;
+in vec2 surface_uv;
+in float surface_depth;
+out vec4 frag_color;
+void main() {
+    vec3 n=normalize(world_normal)*(gl_FrontFacing ? 1.0 : -1.0);
+    float checker=mod(floor(surface_uv.x*8.0)+floor(surface_uv.y*8.0),2.0);
+    vec3 albedo=pow(face_color,vec3(2.2))*mix(1.0,0.8,checker);
+    // Keep linear radiance and forward depth for grass-volume occlusion.
+    frag_color=vec4(surface_light(albedo,n,sun_direction.xyz,sun_color.xyz,1.0,night_radiance.xyz),surface_depth);
+}
+@end
+@program object object_vs object_fs
 
 @vs sky_vs
 @glsl_options fixup_clipspace
@@ -202,29 +232,17 @@ vec3 lunar_disk(vec3 ray) {
     vec3 transmission = sun_transmittance(vec3(0,EARTH+0.0025,0), ray);
     return vec3(0.72,0.70,0.66)*albedo*lit*coverage*transmission;
 }
-float cube_shadow(vec3 p, vec3 sun) {
-    if (sun.y <= 0.0) return 1.0;
-    // Slab intersection against the demo cube in its local space.
-    float c = cos(sky_view.w), s = sin(sky_view.w);
-    vec3 o = p - vec3(0,1,0);
-    o = vec3(c*o.x-s*o.z, o.y, s*o.x+c*o.z);
-    vec3 d = vec3(c*sun.x-s*sun.z, sun.y, s*sun.x+c*sun.z);
-    d = mix(vec3(-1), vec3(1), step(vec3(0), d)) * max(abs(d), vec3(0.00001));
-    vec3 a = (-vec3(1)-o)/d, b = (vec3(1)-o)/d;
-    vec3 lo = min(a,b), hi = max(a,b);
-    float near_t = max(max(lo.x,lo.y),lo.z);
-    float far_t = min(min(hi.x,hi.y),hi.z);
-    return far_t > max(near_t, 0.002) ? 0.0 : 1.0;
-}
 void main() {
     vec3 ray = normalize(camera_basis(sky_view.xy) *
                         vec3(screen_position.x*sky_view.z, screen_position.y, sky_lens.x));
     vec3 sky = atmosphere(ray, sky_sun.xyz, sky_night_radiance.xyz);
     if (ray.y > 0.0) sky += lunar_disk(ray);
     vec3 result = sky;
+    float scene_depth=1000.0;
     if (ray.y < -0.0001) {
         float distance_to_ground = -sky_camera_position.y/ray.y;
         vec3 p = sky_camera_position.xyz + ray*distance_to_ground;
+        scene_depth=min(1000.0,distance_to_ground*dot(ray,camera_basis(sky_view.xy)[2]));
         // Subtle metre grid makes changing shadow length easy to judge.
         vec2 grid_dist = abs(fract(p.xz-0.5)-0.5);
         vec2 footprint = max(fwidth(p.xz), vec2(0.001));
@@ -233,10 +251,10 @@ void main() {
         grid *= 1.0-smoothstep(20.0, 60.0, distance_to_ground);
         vec3 ground = surface_light(vec3(0.16,0.20,0.10)*(1.0-0.15*grid),
                                    vec3(0,1,0), sky_sun.xyz, sky_sun_color.xyz,
-                                   cube_shadow(p, sky_sun.xyz), sky_night_radiance.xyz);
+                                   1.0, sky_night_radiance.xyz);
         result = mix(ground, sky, 1.0-exp(-distance_to_ground*0.0015));
     }
-    frag_color = vec4(display_color(result, sky_camera_exposure.x), 1);
+    frag_color = vec4(result,scene_depth);
 }
 @end
 
@@ -273,32 +291,6 @@ void main() {
 
 @program preview preview_vs preview_fs
 
-@vs terrain_vs
-@glsl_options fixup_clipspace
-@include_block scene_view
-@include_block camera
-in vec3 position;
-in vec3 normal;
-out vec3 ground_normal;
-void main() {
-    vec3 p=transpose(camera_basis(view.xy))*(position-camera_position.xyz);
-    gl_Position=vec4(lens.x*p.x/view.z,lens.x*p.y,(1000.0/999.9)*p.z-100.0/999.9,p.z);
-    ground_normal=normal;
-}
-@end
-@fs terrain_fs
-@include_block scene_light
-@include_block lighting
-in vec3 ground_normal;
-out vec4 frag_color;
-void main() {
-    vec3 soil=pow((vec3(86,52,27)/255.0+0.055)/1.055,vec3(2.4));
-    frag_color=vec4(display_color(surface_light(soil,normalize(ground_normal),sun_direction.xyz,
-        sun_color.xyz,1.0,night_radiance.xyz),camera_exposure.x),1);
-}
-@end
-@program terrain terrain_vs terrain_fs
-
 @vs grass_vs
 @glsl_options fixup_clipspace
 @include_block scene_view
@@ -309,7 +301,7 @@ layout(binding=5) uniform grass_region_params {
 in vec2 blade;
 in float root_height;
 out vec3 grass_normal;
-
+out float grass_depth;
 uint grass_hash(uint seed) {
     uint h = seed*747796405u+2891336453u;
     h = ((h >> ((h >> 28u)+4u)) ^ h)*277803737u;
@@ -329,14 +321,15 @@ void main() {
     vec2 offset = (vec2(float(placement & 65535u),float(placement >> 16u))+0.5)/65536.0;
     vec3 root = vec3((cell.x+offset.x-lens.y*0.5)*0.01, root_height*0.01,
                      (cell.y+offset.y-lens.y*0.5)*0.01);
-    float blade_width=blade.x;
+    float lod=grass_lod.x*smoothstep(grass_lod.y,grass_lod.z,length(root.xz-camera_position.xz));
+    float blade_width=blade.x*(1.0-lod);
     vec3 world = root+vec3(axis.x*blade_width,blade.y,axis.y*blade_width);
     vec3 p = transpose(camera_basis(view.xy))*(world-camera_position.xyz);
     gl_Position = vec4(lens.x*p.x/view.z,lens.x*p.y,
                        (1000.0/999.9)*p.z-100.0/999.9,p.z);
     grass_normal = vec3(-axis.y,0,axis.x);
-
-
+    grass_depth=p.z;
+    if (lod>=1.0) gl_Position=vec4(2,2,2,1);
 }
 @end
 
@@ -344,16 +337,156 @@ void main() {
 @include_block scene_light
 @include_block lighting
 in vec3 grass_normal;
-
+in float grass_depth;
 out vec4 frag_color;
 void main() {
     vec3 n = normalize(grass_normal);
     // Thin, two-sided leaf: either face can receive the directional light.
     if (dot(n,sun_direction.xyz) < 0.0) n = -n;
     vec3 albedo = vec3(0.075,0.16,0.025);
-    frag_color = vec4(display_color(surface_light(albedo,n,sun_direction.xyz,
-                        sun_color.xyz,1.0,night_radiance.xyz),camera_exposure.x),1);
+    frag_color = vec4(surface_light(albedo,n,sun_direction.xyz,
+                        sun_color.xyz,1.0,night_radiance.xyz),grass_depth);
 }
 @end
 
 @program grass grass_vs grass_fs
+
+@fs downsample_fs
+@include_block lighting
+@include_block scene_light
+layout(binding=4) uniform downsample_params {
+    vec4 output_size; // final sensor width and height
+};
+layout(binding=1) uniform texture2D source_image;
+layout(binding=1) uniform sampler source_sampler;
+in vec2 preview_uv;
+out vec4 frag_color;
+vec3 decode_srgb(vec3 c) {
+    return mix(c/12.92,pow((c+0.055)/1.055,vec3(2.4)),step(vec3(0.04045),c));
+}
+vec3 encode_srgb(vec3 c) {
+    return mix(c*12.92,1.055*pow(max(c,vec3(0)),vec3(1.0/2.4))-0.055,step(vec3(0.0031308),c));
+}
+void main() {
+    ivec2 dims = textureSize(sampler2D(source_image,source_sampler),0);
+    ivec2 pixel = clamp(ivec2(preview_uv*output_size.xy),ivec2(0),ivec2(output_size.xy)-1);
+    // Exact box overlap in source-pixel units; handles fractional sqrt(8) scale.
+    vec2 ratio = vec2(dims)/output_size.xy;
+    vec2 lo = vec2(pixel)*ratio, hi = vec2(pixel+1)*ratio;
+    ivec2 start = ivec2(floor(lo));
+    vec3 sum = vec3(0);
+    float weight_sum = 0;
+    // A <= sqrt(8)+rounding pixel footprint overlaps at most 4x4 source pixels.
+    for (int y=0; y<4; ++y) for (int x=0; x<4; ++x) {
+        ivec2 p = start+ivec2(x,y);
+        vec2 overlap = max(vec2(0),min(hi,vec2(p+1))-max(lo,vec2(p)));
+        float weight = overlap.x*overlap.y;
+        if (weight > 0) {
+            vec3 c = texelFetch(sampler2D(source_image,source_sampler),clamp(p,ivec2(0),dims-1),0).rgb;
+            sum += decode_srgb(display_color(c,camera_exposure.x))*weight;
+            weight_sum += weight;
+        }
+    }
+    frag_color = vec4(encode_srgb(sum/weight_sum),1);
+}
+@end
+
+@program downsample preview_vs downsample_fs
+
+
+@fs volume_fs
+@include_block camera
+layout(binding=7) uniform volume_camera_params {
+    vec4 volume_view;
+    vec4 volume_lens;
+    vec4 volume_camera_position;
+    vec4 volume_grass_lod;
+};
+@include_block scene_light
+@include_block lighting
+layout(binding=6) uniform volume_params {
+    vec4 volume_field; // first sample X/Z, sample spacing, size, global slope bound
+    vec4 volume_bounds; // min root height, max tip height, yard half-width, reserved
+};
+layout(binding=2) uniform texture2D scene_image;
+layout(binding=2) uniform sampler scene_sampler;
+layout(binding=3) uniform texture2D height_image;
+layout(binding=3) uniform sampler height_sampler;
+@image_sample_type height_image unfilterable_float
+@sampler_type height_sampler nonfiltering
+in vec2 preview_uv;
+out vec4 frag_color;
+float root_height_at(vec2 xz) {
+    vec2 grid=clamp((xz-volume_field.x)/volume_field.y,vec2(0),vec2(volume_field.z-1.0));
+    ivec2 cell=ivec2(floor(grid));
+    ivec2 last=ivec2(int(volume_field.z)-1);
+    vec2 f=fract(grid);
+    float a=texelFetch(sampler2D(height_image,height_sampler),cell,0).r;
+    float b=texelFetch(sampler2D(height_image,height_sampler),min(cell+ivec2(1,0),last),0).r;
+    float c=texelFetch(sampler2D(height_image,height_sampler),min(cell+ivec2(0,1),last),0).r;
+    float d=texelFetch(sampler2D(height_image,height_sampler),min(cell+ivec2(1,1),last),0).r;
+    return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);
+}
+bool clip_axis(float origin,float direction,float lo,float hi,inout float enter,inout float leave) {
+    if (abs(direction)<1e-7) return origin>=lo && origin<=hi;
+    float a=(lo-origin)/direction,b=(hi-origin)/direction;
+    enter=max(enter,min(a,b)); leave=min(leave,max(a,b));
+    return leave>enter;
+}
+void main() {
+    ivec2 dims=textureSize(sampler2D(scene_image,scene_sampler),0);
+    ivec2 pixel=clamp(ivec2(preview_uv*vec2(dims)),ivec2(0),dims-1);
+    vec4 scene=texelFetch(sampler2D(scene_image,scene_sampler),pixel,0);
+    frag_color=scene;
+    vec2 ndc=preview_uv*2.0-1.0;
+#ifndef SOKOL_GLSL
+    ndc.y=-ndc.y;
+#endif
+    vec3 camera_ray=normalize(vec3(ndc.x*volume_view.z,ndc.y,volume_lens.x));
+    vec3 ray=camera_basis(volume_view.xy)*camera_ray;
+    float horizontal=length(ray.xz);
+    if (horizontal<1e-6) return; // Upright zero-thickness blades have no top-down area.
+    float enter=max(0.1/camera_ray.z,volume_grass_lod.y/horizontal);
+    float leave=min(1000.0,scene.a)/camera_ray.z;
+    if (!clip_axis(volume_camera_position.x,ray.x,-volume_bounds.z,volume_bounds.z,enter,leave) ||
+        !clip_axis(volume_camera_position.z,ray.z,-volume_bounds.z,volume_bounds.z,enter,leave) ||
+        !clip_axis(volume_camera_position.y,ray.y,volume_bounds.x,volume_bounds.y,enter,leave)) return;
+    // Average the original two-sided upright leaf lighting, weighted by projected area.
+    vec3 leaf=vec3(0); float weights=0;
+    for (int i=0; i<16; ++i) {
+        float angle=(float(i)+0.5)*PI/16.0;
+        vec3 n=vec3(cos(angle),0,sin(angle));
+        float w=abs(dot(n,ray));
+        if (dot(n,sun_direction.xyz)<0) n=-n;
+        leaf+=w*surface_light(vec3(0.075,0.16,0.025),n,sun_direction.xyz,sun_color.xyz,1.0,night_radiance.xyz);
+        weights+=w;
+    }
+    leaf/=max(weights,1e-6);
+    float t=enter, transmission=1.0;
+    float rate=abs(ray.y)+volume_field.w*horizontal;
+    // Conservative empty-space steps from the bilinear field's global slope bound.
+    // Inside the layer, midpoint integration at <=1 cm steps evaluates Beer-Lambert extinction.
+    for (int i=0; i<1024; ++i) {
+        if (t>=leave || transmission<0.002) break;
+        vec3 p=volume_camera_position.xyz+ray*t;
+        float h=p.y-root_height_at(p.xz);
+        float gap=max(-h,h-0.05);
+        if (gap>0.001) {
+            t+=min(leave-t,max(0.001,gap/max(rate,1e-6)*0.9));
+            continue;
+        }
+        float step_length=min(0.01,leave-t);
+        vec3 midpoint=volume_camera_position.xyz+ray*(t+0.5*step_length);
+        float height=midpoint.y-root_height_at(midpoint.xz);
+        if (height>=0.0 && height<0.05) {
+            float lod=smoothstep(volume_grass_lod.y,volume_grass_lod.z,length(midpoint.xz-volume_camera_position.xz));
+            // 10,000 roots/m² * 5 mm base width * triangular width profile * mean projected azimuth.
+            float sigma=50.0*(1.0-height/0.05)*(2.0/PI)*horizontal*lod*volume_grass_lod.w;
+            transmission*=exp(-sigma*step_length);
+        }
+        t+=step_length;
+    }
+    frag_color=vec4(leaf*(1.0-transmission)+scene.rgb*transmission,scene.a);
+}
+@end
+@program volume preview_vs volume_fs
