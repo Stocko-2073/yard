@@ -1,6 +1,5 @@
 #ifndef YARD_ASTRONOMY_H
 #define YARD_ASTRONOMY_H
-#include <stdbool.h>
 #include <time.h>
 
 #define YARD_LATITUDE 32.8908277

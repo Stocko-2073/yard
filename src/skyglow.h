@@ -1,6 +1,5 @@
 #ifndef YARD_SKYGLOW_H
 #define YARD_SKYGLOW_H
-#include <stdbool.h>
 
 typedef struct {
     double latitude, longitude;

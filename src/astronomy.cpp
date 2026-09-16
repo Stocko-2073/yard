@@ -108,8 +108,14 @@ bool yard_local_datetime(const char *date, double hour, double *unix_seconds) {
     if (strlen(date) != 10 || sscanf(date, "%4d-%2d-%2d%n", &year, &month, &day, &consumed) != 3 ||
         consumed != 10 || year < 1900 || year > 2100 || !isfinite(hour) || hour < 0 || hour >= 24) return false;
     int seconds = (int)floor(hour*3600);
-    struct tm tm = {.tm_year=year-1900, .tm_mon=month-1, .tm_mday=day,
-                    .tm_hour=seconds/3600, .tm_min=(seconds/60)%60, .tm_sec=seconds%60, .tm_isdst=-1};
+    struct tm tm = {};
+    tm.tm_year = year-1900;
+    tm.tm_mon = month-1;
+    tm.tm_mday = day;
+    tm.tm_hour = seconds/3600;
+    tm.tm_min = (seconds/60)%60;
+    tm.tm_sec = seconds%60;
+    tm.tm_isdst = -1;
     time_t result = mktime(&tm);
     // Reject invalid dates and nonexistent local times at the spring DST transition.
     if (tm.tm_year != year-1900 || tm.tm_mon != month-1 || tm.tm_mday != day ||
