@@ -444,8 +444,10 @@ The solar disk, atmospheric extinction, and directional light share one sun
 position. Colors are lit in linear space, multiplied by camera shutter/gain, tone mapped, and
 converted to sRGB. Ambient skylight and distant ground haze are approximations;
 clouds, multiple scattering, stars, and photometric calibration are not implemented.
-Terrain uses directional sunlight and ambient sky lighting, with no terrain
-self-shadowing or ambient occlusion yet. The sky integrates 16 view
+Terrain uses directional sunlight and a sun-elevation-dependent sky/ground
+ambient blend that softens blue shadows. The shared fill is documented in
+[materials and shading](design/MATERIALS.md). There is no terrain self-shadowing
+or ambient occlusion yet. The sky integrates 16 view
 samples with eight sun samples each per fragment; a cached sky lookup texture
 is a possible optimization as the yard grows.
 

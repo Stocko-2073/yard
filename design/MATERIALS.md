@@ -2,7 +2,7 @@
 
 The preview uses a restrained material palette, a thin diffuse leaf model and
 object sun shadows. These are visual approximations, not measured reflectance or
-an OV2640 color calibration. Exposure, tone mapping, sky radiance and final camera
+an OV2640 color calibration. Exposure, tone mapping, visible sky radiance and final camera
 resolution retain their existing behavior.
 
 ## Palette
@@ -15,6 +15,36 @@ randomness or fine procedural noise is added. Tree leaves use sRGB (0.30, 0.40,
 (0.36, 0.30, 0.23). Blossoms use (0.85, 0.62, 0.68). Object material inputs now
 use the piecewise sRGB decode, matching the soil's color convention. Leaf/wood
 identity is explicit vertex data, independent of palette values.
+
+## Lighting balance
+
+Daytime ambient fill blends a softly cool upper hemisphere with a muted warm/green
+lower hemisphere. At high sun the linear RGB endpoints are (0.18, 0.215, 0.25)
+and (0.070, 0.075, 0.055), respectively. This lifts red/green in shaded surfaces
+and reduces the former blue bias without changing material reflectance or exposure.
+A vertical surface receives their equal mix, (0.125, 0.145, 0.1525), compared to
+the old (0.065, 0.1105, 0.182).
+
+The endpoints diminish to (0.10, 0.115, 0.15) and (0.025, 0.027, 0.020) near
+the horizon, interpolating smoothly with sun elevation over 0–40.5 degrees.
+The existing twilight fade gates both; deep night retains only the existing
+site-dependent night contribution. Direct sunlight retains its atmospheric color,
+intensity and shadow visibility, preserving warm low-sun illumination. The visible
+sky and tone curve are unchanged. Grass blades, volume, objects and soil share
+this balance; the volume keeps ambient separate from shadowed direct light.
+
+This is an art-directed hemisphere approximation, not sky integration or measured
+ground bounce. It does not add occlusion or light transport from nearby objects.
+
+Paused previews at the same manual exposure on 2026-09-15, with 8× SSAA and volume:
+
+![12:00 local, revised daylight balance](yard-demo.png)
+
+![18:00 local, lower sun and reduced ambient fill](lighting-evening.png)
+
+The lighting update passed portable shader generation, a warning-free macOS build,
+the four-phase Metal smoke check, and a volume/tree orbit with 4× MSAA. The two
+window captures check appearance; they do not establish physical calibration.
 
 ## Thin foliage
 

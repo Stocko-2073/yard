@@ -17,7 +17,7 @@ adds the curve and polygon examples to the same renderer.
 
 ![Daytime aspen with revised materials and sun shadows](yard-demo.png)
 
-Paused at 2026-09-15 12:00 local time, with 8× SSAA and blade grass.
+Paused at 2026-09-15 12:00 local time, with 8× SSAA and the 6–18 m grass-volume transition.
 See [materials and shading](MATERIALS.md) for the palette and shadow model.
 
 ## Restored renderer from PR #7
