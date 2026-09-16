@@ -1,3 +1,20 @@
+@block scene_view
+layout(binding=0) uniform vs_params {
+    vec4 view; // yaw, pitch, aspect, cube angle
+    vec4 lens; // projection scale
+    vec4 camera_position;
+};
+@end
+
+@block scene_light
+layout(binding=1) uniform light_params {
+    vec4 sun_direction;
+    vec4 sun_color;
+    vec4 night_radiance;
+    vec4 camera_exposure; // shutter * gain / reference exposure
+};
+@end
+
 @block camera
 // Camera at yard eye height. North is -Z, east is +X.
 mat3 camera_basis(vec2 look) {
@@ -82,11 +99,7 @@ vec3 surface_light(vec3 albedo, vec3 normal, vec3 sun, vec3 sunlight, float visi
 
 @vs vs
 @glsl_options fixup_clipspace
-layout(binding=0) uniform vs_params {
-    vec4 view; // yaw, pitch, aspect, cube angle
-    vec4 lens; // projection scale
-    vec4 camera_position;
-};
+@include_block scene_view
 @include_block camera
 in vec3 position;
 in vec3 color;
@@ -111,12 +124,7 @@ void main() {
 @end
 
 @fs fs
-layout(binding=1) uniform light_params {
-    vec4 sun_direction;
-    vec4 sun_color;
-    vec4 night_radiance;
-    vec4 camera_exposure; // shutter * gain / reference exposure
-};
+@include_block scene_light
 @include_block lighting
 in vec3 face_color;
 in vec3 world_position;
@@ -264,3 +272,88 @@ void main() {
 @end
 
 @program preview preview_vs preview_fs
+
+@vs terrain_vs
+@glsl_options fixup_clipspace
+@include_block scene_view
+@include_block camera
+in vec3 position;
+in vec3 normal;
+out vec3 ground_normal;
+void main() {
+    vec3 p=transpose(camera_basis(view.xy))*(position-camera_position.xyz);
+    gl_Position=vec4(lens.x*p.x/view.z,lens.x*p.y,(1000.0/999.9)*p.z-100.0/999.9,p.z);
+    ground_normal=normal;
+}
+@end
+@fs terrain_fs
+@include_block scene_light
+@include_block lighting
+in vec3 ground_normal;
+out vec4 frag_color;
+void main() {
+    vec3 soil=pow((vec3(86,52,27)/255.0+0.055)/1.055,vec3(2.4));
+    frag_color=vec4(display_color(surface_light(soil,normalize(ground_normal),sun_direction.xyz,
+        sun_color.xyz,1.0,night_radiance.xyz),camera_exposure.x),1);
+}
+@end
+@program terrain terrain_vs terrain_fs
+
+@vs grass_vs
+@glsl_options fixup_clipspace
+@include_block scene_view
+@include_block camera
+layout(binding=5) uniform grass_region_params {
+    vec4 grass_region; // voxel origin X/Z, region width, reserved
+};
+in vec2 blade;
+in float root_height;
+out vec3 grass_normal;
+
+uint grass_hash(uint seed) {
+    uint h = seed*747796405u+2891336453u;
+    h = ((h >> ((h >> 28u)+4u)) ^ h)*277803737u;
+    return (h >> 22u) ^ h;
+}
+void main() {
+    int side = int(lens.y);
+    uint local_id = uint(gl_InstanceIndex)*uint(lens.z);
+    int width = int(grass_region.z);
+    ivec2 grid = ivec2(grass_region.xy)+ivec2(int(local_id)%width,int(local_id)/width);
+    uint id = uint(grid.y*side+grid.x);
+    vec2 cell = vec2(grid);
+    // Separate hashes keep placement stable and independent of azimuth.
+    uint h = grass_hash(id);
+    vec2 axis = normalize(vec2(float(h & 65535u),float(h >> 16u))-vec2(32767.5));
+    uint placement = grass_hash(id ^ 0x9e3779b9u);
+    vec2 offset = (vec2(float(placement & 65535u),float(placement >> 16u))+0.5)/65536.0;
+    vec3 root = vec3((cell.x+offset.x-lens.y*0.5)*0.01, root_height*0.01,
+                     (cell.y+offset.y-lens.y*0.5)*0.01);
+    float blade_width=blade.x;
+    vec3 world = root+vec3(axis.x*blade_width,blade.y,axis.y*blade_width);
+    vec3 p = transpose(camera_basis(view.xy))*(world-camera_position.xyz);
+    gl_Position = vec4(lens.x*p.x/view.z,lens.x*p.y,
+                       (1000.0/999.9)*p.z-100.0/999.9,p.z);
+    grass_normal = vec3(-axis.y,0,axis.x);
+
+
+}
+@end
+
+@fs grass_fs
+@include_block scene_light
+@include_block lighting
+in vec3 grass_normal;
+
+out vec4 frag_color;
+void main() {
+    vec3 n = normalize(grass_normal);
+    // Thin, two-sided leaf: either face can receive the directional light.
+    if (dot(n,sun_direction.xyz) < 0.0) n = -n;
+    vec3 albedo = vec3(0.075,0.16,0.025);
+    frag_color = vec4(display_color(surface_light(albedo,n,sun_direction.xyz,
+                        sun_color.xyz,1.0,night_radiance.xyz),camera_exposure.x),1);
+}
+@end
+
+@program grass grass_vs grass_fs

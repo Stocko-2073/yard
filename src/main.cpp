@@ -14,6 +14,7 @@
 #include "camera.h"
 #include "geometry.h"
 #include "tree.h"
+#include "yard_scene.h"
 #include <exception>
 #include <cstddef>
 
@@ -42,6 +43,7 @@ static struct {
     bool paused;
     bool smoke_test;
     bool geometry_demo;
+    bool yard_demo, yard_smoke_test, no_grass;
     const char* tree_species;
     int mesh_index_count;
 } state;
@@ -70,6 +72,10 @@ static void init(void) {
     graphics.environment = sglue_environment();
     graphics.logger.func = slog_func;
     sg_setup(graphics);
+    if (state.yard_demo) {
+        try { yard_scene_create(); }
+        catch (const std::exception& e) { fprintf(stderr,"Cannot create yard: %s\n",e.what()); exit(EXIT_FAILURE); }
+    }
 
     static const float sky_vertices[][2] = {{-1,-1}, {3,-1}, {-1,3}};
     state.sky_bindings.vertex_buffers[0] = sg_make_buffer(sg_buffer_desc{
@@ -153,7 +159,7 @@ static void init(void) {
     };
     // The existing cube now exercises planar surface generation on all six axes.
     const std::array<Ring,1> square = {Ring{{0,0},{2,0},{2,2},{0,2}}};
-    for (int face=0; face<6; ++face) {
+    for (int face=0; face<6 && !state.yard_demo; ++face) {
         const auto *a=vertices[face*4], *b=vertices[face*4+1], *d=vertices[face*4+3];
         append(polygon(square, {a[0],a[1],a[2]},
                        {(b[0]-a[0])*.5f,(b[1]-a[1])*.5f,(b[2]-a[2])*.5f},
@@ -172,11 +178,13 @@ static void init(void) {
         try {
             auto skeleton = yard::tree::generate(yard::tree::preset(state.tree_species ? state.tree_species : "fan_palm"), 123);
             auto tree = yard::tree::mesh(skeleton);
-            auto place = [](Mesh& mesh) {
+            const float tree_x = state.yard_demo ? 0 : 5, tree_z = state.yard_demo ? -6 : -10;
+            const float tree_base = state.yard_demo ? yard_scene_height(tree_x,tree_z)-.02f : 0;
+            auto place = [=](Mesh& mesh) {
                 for (auto& vertex : mesh.vertices) {
-                    vertex.position.x += 5;
-                    vertex.position.y -= 1; // shared scene transform lifts geometry one metre
-                    vertex.position.z -= 10;
+                    vertex.position.x += tree_x;
+                    vertex.position.y += tree_base-1; // shared scene transform lifts geometry one metre
+                    vertex.position.z += tree_z;
                 }
             };
             place(tree.wood); place(tree.leaves); place(tree.blossoms);
@@ -244,6 +252,13 @@ static void frame(void) {
         state.track_moon = true;
         state.zoom = true;
     }
+    if (state.yard_smoke_test) {
+        yard_local_datetime("2026-09-15",12,&state.utc);
+        float orbit = state.captures/120.0f*6.2831853f;
+        state.position[0]=22*sinf(orbit);state.position[2]=-6+22*cosf(orbit);
+        state.yaw=orbit;state.pitch=.06f;state.track_moon=false;state.zoom=false;
+    }
+    if (state.yard_demo) state.position[1]=yard_scene_height(state.position[0],state.position[2])+1.6f;
     yard_astronomy(state.utc, state.site.latitude, state.site.longitude, &state.ephemeris);
     if (state.track_moon) {
         state.yaw = (float)atan2(state.ephemeris.moon[0], -state.ephemeris.moon[2]);
@@ -256,7 +271,8 @@ static void frame(void) {
         struct tm local;
         yard_local_calendar(state.utc, &local);
         strftime(date, sizeof(date), "%Y-%m-%d %H:%M %Z", &local);
-        snprintf(title, sizeof(title), "Yard | %dx%d | Manual %.2f ms %.1fx (AEC %d, gain %d) | Lat %.5f, Lon %.5f | %s | Moon %.0f%% %s%s",
+        snprintf(title, sizeof(title), "Yard | %s | %dx%d | Manual %.2f ms %.1fx (AEC %d, gain %d) | Lat %.5f, Lon %.5f | %s | Moon %.0f%% %s%s",
+                 state.yard_demo ? (state.no_grass ? "Tree + soil" : "Tree + grass") : "Sky demo",
                  state.camera.profile.width, state.camera.profile.height, yard_camera_exposure_ms(&state.camera),
                  yard_camera_gain(&state.camera), state.camera.exposure_lines, state.camera.gain_index,
                  state.site.latitude, state.site.longitude, date, state.ephemeris.illuminated*100, state.ephemeris.waxing ? "waxing" : "waning",
@@ -268,7 +284,7 @@ static void frame(void) {
     if (state.captures == 0 || state.capture_elapsed >= (1.0 / state.camera.profile.fps)) {
         state.capture_elapsed = fmod(state.capture_elapsed, (1.0 / state.camera.profile.fps));
         const vs_params_t uniforms = {
-            .view = {state.yaw, state.pitch, (float)state.camera.profile.width / state.camera.profile.height, state.angle},
+            .view = {state.yaw, state.pitch, (float)state.camera.profile.width / state.camera.profile.height, state.yard_demo ? 0.0f : state.angle},
             .lens = {1.0f / tanf(state.vertical_fov * 0.00872664626f), 0, 0, 0},
             .camera_position = {state.position[0], state.position[1], state.position[2], 0},
         };
@@ -305,6 +321,7 @@ static void frame(void) {
         sg_apply_uniforms(UB_vs_params, SG_RANGE(uniforms));
         sg_apply_uniforms(UB_light_params, SG_RANGE(light));
         sg_draw(0, state.mesh_index_count, 1);
+        if (state.yard_demo) yard_scene_draw(uniforms,light,!state.no_grass);
         sg_end_pass();
         ++state.captures;
     }
@@ -327,9 +344,10 @@ static void frame(void) {
     sg_draw(0, 3, 1);
     sg_end_pass();
     sg_commit();
-    if (state.captures == 120 && state.smoke_test) {
-        printf("Yard: rendered 120 %dx%d camera frames on Metal at a maximum of %.1f fps (four lunar phases).\n",
-               state.camera.profile.width, state.camera.profile.height, state.camera.profile.fps);
+    if (state.captures == 120 && (state.smoke_test || state.yard_smoke_test)) {
+        printf("Yard: rendered 120 %dx%d camera frames on Metal at a maximum of %.1f fps (%s).\n",
+               state.camera.profile.width, state.camera.profile.height, state.camera.profile.fps,
+               state.yard_smoke_test ? "tree and grass terrain orbit" : "four lunar phases");
         sapp_request_quit();
     }
 }
@@ -362,6 +380,10 @@ static void event(const sapp_event *ev) {
         yard_camera_step_gain(&state.camera, ev->key_code == SAPP_KEYCODE_EQUAL ? 1 : -1);
         state.title_minute = INT64_MIN;
     }
+    if (state.yard_demo && ev->key_code == SAPP_KEYCODE_G) {
+        state.no_grass = !state.no_grass;
+        state.title_minute = INT64_MIN;
+    }
     if (ev->key_code == SAPP_KEYCODE_M) state.track_moon = !state.track_moon;
     if (ev->key_code == SAPP_KEYCODE_Z) state.zoom = !state.zoom;
     if (ev->key_code == SAPP_KEYCODE_W || ev->key_code == SAPP_KEYCODE_A ||
@@ -385,9 +407,9 @@ static void event(const sapp_event *ev) {
     if (ev->key_code == SAPP_KEYCODE_R) {
         state.position[0] = 0;
         state.position[1] = 2.5f;
-        state.position[2] = 8;
+        state.position[2] = state.yard_demo ? 18 : 8;
         state.yaw = 0;
-        state.pitch = -0.10f;
+        state.pitch = state.yard_demo ? .08f : -.10f;
         state.utc = (double)time(nullptr);
         state.track_moon = false;
         state.zoom = false;
@@ -395,7 +417,7 @@ static void event(const sapp_event *ev) {
     }
 }
 
-static void cleanup(void) { sapp_lock_mouse(false); sg_shutdown(); }
+static void cleanup(void) { sapp_lock_mouse(false); if(state.yard_demo)yard_scene_destroy(); sg_shutdown(); }
 
 sapp_desc sokol_main(int argc, char *argv[]) {
     if (setenv("TZ", "America/New_York", 1) != 0) {
@@ -407,8 +429,8 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     state.vertical_fov = 60.0f; // XIAO Sense OV2640 stock lens FOV is not yet calibrated.
     state.utc = (double)time(nullptr);
     state.position[1] = 2.5f;
-    state.position[2] = 8;
-    state.pitch = -0.10f;
+    state.position[2] = state.yard_demo ? 18 : 8;
+    state.pitch = state.yard_demo ? .08f : -.10f;
     state.angle = 0.4f;
     state.title_minute = INT64_MIN;
     const char *requested_date = nullptr;
@@ -417,6 +439,9 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     double exposure_ms = -1, gain = -1, exposure_lines = -1, gain_index = -1;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--smoke-test") == 0) state.smoke_test = true;
+        else if (strcmp(argv[i], "--yard-demo") == 0) state.yard_demo = true;
+        else if (strcmp(argv[i], "--yard-smoke-test") == 0) {state.yard_demo=true;state.yard_smoke_test=true;}
+        else if (strcmp(argv[i], "--no-grass") == 0) state.no_grass = true;
         else if (strcmp(argv[i], "--geometry-demo") == 0) state.geometry_demo = true;
         else if (strcmp(argv[i], "--tree") == 0 && i+1 < argc) state.tree_species = argv[++i];
         else if (strcmp(argv[i], "--moon") == 0) state.track_moon = true;
@@ -456,6 +481,11 @@ sapp_desc sokol_main(int argc, char *argv[]) {
                 requested_hour < 0 || requested_hour >= 24) goto usage;
         } else goto usage;
     }
+    if (state.yard_demo) {
+        if (!state.tree_species) state.tree_species="quaking_aspen";
+        state.position[2]=18;state.pitch=.08f;
+    }
+    if (state.yard_smoke_test && state.smoke_test) goto usage;
     if (profile_path) {
         yard_camera_profile profile;
         if (!yard_camera_profile_load(profile_path, &profile)) {
@@ -493,7 +523,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
         .logger = {.func = slog_func},
     };
 usage:
-    fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--smoke-test] [--geometry-demo] [--tree species] [--site profile]\n"
+    fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--smoke-test] [--geometry-demo] [--yard-demo | --yard-smoke-test] [--no-grass] [--tree species] [--site profile]\n"
                     "Camera: [--camera-profile FILE] [--exposure-ms MS | --aec-value LINES] [--gain MULTIPLIER | --agc-gain INDEX]\n"
                     "OV2640 default: manual shutter 0-33.333333 ms (AEC 0-1200, frame-capped), gain 1-31x (index 0-30).\n"
                     "Keys: comma/period = shutter -/+ 1/3 stop; minus/equal = gain -/+ one step.\n"

@@ -16,7 +16,7 @@ all: build/yard
 build:
 	mkdir -p build
 
-build/main.o: src/main.cpp src/tree.h src/tree_params.inc src/geometry.h src/astronomy.h src/skyglow.h src/camera.h $(HEADERS) $(SHADER_HEADER) | build
+build/main.o: src/main.cpp src/yard_scene.h src/tree.h src/tree_params.inc src/geometry.h src/astronomy.h src/skyglow.h src/camera.h $(HEADERS) $(SHADER_HEADER) | build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
 build/sokol.o: src/sokol.m $(HEADERS) | build
@@ -31,7 +31,7 @@ build/skyglow.o: src/skyglow.cpp src/skyglow.h src/astronomy.h | build
 build/camera.o: src/camera.cpp src/camera.h | build
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-build/yard: build/tree.o build/geometry.o build/main.o build/sokol.o build/astronomy.o build/skyglow.o build/camera.o
+build/yard: build/yard_scene.o build/terrain.o build/marching_cubes.o build/visibility.o build/tree.o build/geometry.o build/main.o build/sokol.o build/astronomy.o build/skyglow.o build/camera.o
 	$(CXX) $^ $(FRAMEWORKS) -o $@
 
 run: build/yard
@@ -49,7 +49,9 @@ build/skyglow-test: tests/skyglow_test.cpp src/skyglow.cpp src/skyglow.h src/ast
 build/camera-test: tests/camera_test.cpp src/camera.cpp src/camera.h | build
 	$(CXX) $(CXXFLAGS) -Isrc tests/camera_test.cpp src/camera.cpp -o $@
 
-test: build/astronomy-test build/skyglow-test build/camera-test build/geometry-test build/tree-test
+test: build/terrain-test build/visibility-test build/astronomy-test build/skyglow-test build/camera-test build/geometry-test build/tree-test
+	./build/terrain-test
+	./build/visibility-test
 	./build/astronomy-test
 	./build/skyglow-test
 	./build/camera-test
@@ -98,3 +100,22 @@ tree-bench: build/tree-bench
 
 build/tree-test: tests/tree_test.cpp src/tree.cpp src/tree.h $(TREE_DATA) src/geometry.cpp src/geometry.h vendor/earcut/earcut.hpp | build
 	$(CXX) $(CXXFLAGS) -Isrc -isystem vendor/earcut tests/tree_test.cpp src/tree.cpp src/geometry.cpp -o $@
+
+build/terrain.o: src/terrain.cpp src/terrain.h src/marching_cubes.h | build
+	$(CXX) $(CXXFLAGS) -O2 -c $< -o $@
+build/marching_cubes.o: src/marching_cubes.cpp src/marching_cubes.h vendor/marching_cubes/tables.h | build
+	$(CXX) $(CXXFLAGS) -O2 -c $< -o $@
+build/visibility.o: src/visibility.cpp src/visibility.h src/terrain.h | build
+	$(CXX) $(CXXFLAGS) -O2 -c $< -o $@
+build/yard_scene.o: src/yard_scene.cpp src/yard_scene.h src/terrain.h src/visibility.h $(HEADERS) $(SHADER_HEADER) | build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+build/terrain-test: tests/terrain_test.cpp src/terrain.cpp src/marching_cubes.cpp src/terrain.h src/marching_cubes.h vendor/marching_cubes/tables.h | build
+	$(CXX) $(CXXFLAGS) -O2 -Isrc tests/terrain_test.cpp src/terrain.cpp src/marching_cubes.cpp -o $@
+build/visibility-test: tests/visibility_test.cpp src/visibility.cpp src/terrain.cpp src/marching_cubes.cpp src/visibility.h src/terrain.h src/marching_cubes.h vendor/marching_cubes/tables.h | build
+	$(CXX) $(CXXFLAGS) -O2 -Isrc tests/visibility_test.cpp src/visibility.cpp src/terrain.cpp src/marching_cubes.cpp -o $@
+
+.PHONY: yard-smoke-test run-yard
+run-yard: build/yard
+	./build/yard --yard-demo --time 12
+yard-smoke-test: build/yard
+	./build/yard --yard-smoke-test

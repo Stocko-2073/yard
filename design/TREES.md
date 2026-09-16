@@ -17,7 +17,10 @@ make tree-bench
 make test
 ```
 
-The demo uses seed 123 and places one full-sized tree beyond the cube. The
+Use `--yard-demo --tree SPECIES` to place the tree in the grassy terrain; see
+[yard integration](YARD_DEMO.md).
+
+The sky demo uses seed 123 and places one full-sized tree beyond the cube. The
 camera remains fixed at SVGA, with the existing projection and manual exposure.
 Foliage renders from both sides, with the facing normal used for lighting.
 Tree shadows, textures, translucency, wind and automatic scene framing are not

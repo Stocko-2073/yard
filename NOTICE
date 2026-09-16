@@ -7,7 +7,8 @@ The C++ adaptation and generated preset/foliage data in src/tree* are distribute
 under the GNU General Public License version 3. See COPYING and
 vendor/tree-gen/LICENSE. Yard's combined executable includes this GPLv3 code;
 redistribution of that executable must comply with GPLv3. Existing third-party
-components retain their respective licenses (Sokol: zlib; Earcut: ISC).
+components retain their respective licenses (Sokol: zlib; Earcut: ISC;
+PyMCubes lookup tables: BSD-3-Clause).
 
 The original algorithm, all species presets, turtle, foliage and utilities are
 preserved unmodified in vendor/tree-gen for attribution and reproducible Blender
