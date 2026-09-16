@@ -72,10 +72,15 @@ vec3 display_color(vec3 linear_color, float exposure) {
 }
 vec3 surface_light(vec3 albedo, vec3 normal, vec3 sun, vec3 sunlight, float visibility, vec3 night) {
     float day = smoothstep(-0.12, 0.18, sun.y);
-    // Hemispherical ambient approximation; direct irradiance uses atmospheric extinction.
-    // Uniform night hemisphere: irradiance = PI * radiance, in render units.
-    vec3 ambient = vec3(0.10, 0.17, 0.28)*day + PI*night;
-    ambient *= mix(0.3, 1.0, normal.y*0.5+0.5);
+    // Broad sky fill plus muted ground-facing fill, in linear render units.
+    // These hemisphere colors are an art-directed approximation, not sampled GI.
+    float high_sun = smoothstep(0.0, 0.65, sun.y);
+    vec3 sky_fill = mix(vec3(0.10,0.115,0.15),vec3(0.18,0.215,0.25),high_sun);
+    vec3 ground_fill = mix(vec3(0.025,0.027,0.020),vec3(0.070,0.075,0.055),high_sun);
+    float up = clamp(normal.y*0.5+0.5,0.0,1.0);
+    vec3 ambient = day*mix(ground_fill,sky_fill,up);
+    // Preserve the existing site-dependent night contribution and its orientation.
+    ambient += PI*night*mix(0.3,1.0,up);
     return albedo * (ambient + sunlight * max(dot(normal, sun), 0.0) * visibility);
 }
 vec3 material_linear(vec3 srgb) {
