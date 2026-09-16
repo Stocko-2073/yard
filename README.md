@@ -171,7 +171,7 @@ volume LOD without moving the camera; the title shows `blades` or `volume LOD`.
 ./build/yard --date 2026-09-14 --time 9 --eye-height 0.4 --grass-volume --lod-start 0.5 --lod-end 1
 ```
 
-The default transition is **3–6 m horizontal distance** from the camera. Within
+The default transition is **6–18 m horizontal distance** from the camera. Within
 that band, blade widths smoothly narrow as the volume contribution increases.
 Draw regions entirely beyond the band stop submitting blades; nearby intersecting
 regions can still submit degenerate distant blades. `--lod-start` and `--lod-end`

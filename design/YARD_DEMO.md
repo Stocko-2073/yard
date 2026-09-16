@@ -37,7 +37,7 @@ Projection/FOV, camera cadence, manual exposure, window letterboxing and preview
 zoom remain independent of window size and Retina scaling.
 
 Optional `--grass-volume` (V) uses PR #7's 5 cm shallow density layer, transitioning
-from blades over 3–6 horizontal metres by default. `--lod-start` / `--lod-end`
+from blades over 6–18 horizontal metres by default. `--lod-start` / `--lod-end`
 configure the transition. Scene RGB remains linear HDR and alpha stores forward
 camera depth in RGBA16F. The volume stops at the nearest opaque object, including
 the tree's trunk and leaves, and composites before exposure/tone mapping. Near

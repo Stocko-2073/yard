@@ -846,8 +846,8 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     state.ssaa = 8;
     state.msaa = 1;
     state.grass_stride = 1;
-    state.lod_start=3;
-    state.lod_end=6;
+    state.lod_start=6;
+    state.lod_end=18;
     state.eye_height = 1.6f;
     state.vertical_fov = 60.0f; // XIAO Sense OV2640 stock lens FOV is not yet calibrated.
     state.utc = (double)time(nullptr);

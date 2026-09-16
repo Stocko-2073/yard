@@ -55,7 +55,10 @@ as sunlight moves. This is a fixed reconstruction filter, not a physically sized
 solar penumbra. Outside the finite light volume, receivers are unshadowed. There
 is no temporal accumulation. Grass-volume integration samples the same shadow map
 and palette before exposure and supersampling resolve; volume/blade coverage and
-lighting remain approximate at their transition.
+lighting remain approximate at their transition. The default smooth transition
+now spans 6–18 horizontal metres, retaining nearby blades and distributing the
+fade across 12 metres. `--lod-start` and `--lod-end` override these distances;
+the wider range submits more blades than the earlier 3–6 m default.
 
 ## Compare
 
