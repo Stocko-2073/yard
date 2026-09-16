@@ -13,13 +13,15 @@ Implement in two stages, with tree generation consuming the geometry engine.
       generation and expose detail controls suitable for producing LOD meshes.
       Implemented cubic Bézier sampling, profile sweeps, and planar polygons with
       holes; see [research, API limits, and benchmarks](design/GEOMETRY.md).
-- [ ] Port [tree-gen](https://github.com/friggog/tree-gen)'s generation algorithm
+- [x] Port [tree-gen](https://github.com/friggog/tree-gen)'s generation algorithm
       and species presets to C++ against that geometry engine, replacing Blender
       geometry operations. Preserve its GPLv3 license and attribution. Compare
       representative species against Blender output and measure generation time
       and mesh size. Keep the branch skeleton separate from render meshes so
       seasonal foliage, pruning, and collision representations can build on it;
       persistent biological growth remains additional work.
+      Implemented all 20 presets, separate skeleton/foliage records, and mesh
+      detail controls; see [Blender comparisons and measurements](design/TREES.md).
 
 ## Camera
 

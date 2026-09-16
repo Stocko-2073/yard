@@ -13,6 +13,8 @@
 #include "skyglow.h"
 #include "camera.h"
 #include "geometry.h"
+#include "tree.h"
+#include <exception>
 #include <cstddef>
 
 
@@ -40,6 +42,7 @@ static struct {
     bool paused;
     bool smoke_test;
     bool geometry_demo;
+    const char* tree_species;
     int mesh_index_count;
 } state;
 
@@ -165,6 +168,26 @@ static void init(void) {
                                          Ring{{.5f,1},{1.5f,1},{1.5f,2},{.5f,2}}};
         append(polygon(panel,{-4,-1,0}), {.35f,.65f,.4f}, true);
     }
+    if (state.tree_species || state.smoke_test) {
+        try {
+            auto skeleton = yard::tree::generate(yard::tree::preset(state.tree_species ? state.tree_species : "fan_palm"), 123);
+            auto tree = yard::tree::mesh(skeleton);
+            auto place = [](Mesh& mesh) {
+                for (auto& vertex : mesh.vertices) {
+                    vertex.position.x += 5;
+                    vertex.position.y -= 1; // shared scene transform lifts geometry one metre
+                    vertex.position.z -= 10;
+                }
+            };
+            place(tree.wood); place(tree.leaves); place(tree.blossoms);
+            append(tree.wood, {.40f,.27f,.16f}, false);
+            append(tree.leaves, {.23f,.46f,.13f}, false);
+            append(tree.blossoms, {.95f,.65f,.75f}, false);
+        } catch (const std::exception& error) {
+            fprintf(stderr, "Cannot generate tree: %s\n", error.what());
+            exit(EXIT_FAILURE);
+        }
+    }
     state.mesh_index_count = static_cast<int>(indices.size());
     state.bindings.vertex_buffers[0] = sg_make_buffer(sg_buffer_desc{
         .data = {render_vertices.data(), render_vertices.size()*sizeof(RenderVertex)}, .label = "geometry vertices",
@@ -186,7 +209,7 @@ static void init(void) {
     cube_pipeline.layout.attrs[ATTR_cube_uv].offset = offsetof(RenderVertex, geometry) + offsetof(Vertex, uv);
     cube_pipeline.layout.attrs[ATTR_cube_color].offset = offsetof(RenderVertex, color);
     cube_pipeline.index_type = SG_INDEXTYPE_UINT32;
-    cube_pipeline.cull_mode = SG_CULLMODE_BACK;
+    cube_pipeline.cull_mode = SG_CULLMODE_NONE; // foliage has two visible sides
     cube_pipeline.face_winding = SG_FACEWINDING_CCW;
     cube_pipeline.depth.pixel_format = SG_PIXELFORMAT_DEPTH;
     cube_pipeline.depth.write_enabled = true;
@@ -395,6 +418,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--smoke-test") == 0) state.smoke_test = true;
         else if (strcmp(argv[i], "--geometry-demo") == 0) state.geometry_demo = true;
+        else if (strcmp(argv[i], "--tree") == 0 && i+1 < argc) state.tree_species = argv[++i];
         else if (strcmp(argv[i], "--moon") == 0) state.track_moon = true;
         else if (strcmp(argv[i], "--zoom") == 0) state.zoom = true;
         else if (strcmp(argv[i], "--camera-profile") == 0 && i+1 < argc) profile_path = argv[++i];
@@ -469,7 +493,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
         .logger = {.func = slog_func},
     };
 usage:
-    fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--smoke-test] [--geometry-demo] [--site profile]\n"
+    fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--smoke-test] [--geometry-demo] [--tree species] [--site profile]\n"
                     "Camera: [--camera-profile FILE] [--exposure-ms MS | --aec-value LINES] [--gain MULTIPLIER | --agc-gain INDEX]\n"
                     "OV2640 default: manual shutter 0-33.333333 ms (AEC 0-1200, frame-capped), gain 1-31x (index 0-30).\n"
                     "Keys: comma/period = shutter -/+ 1/3 stop; minus/equal = gain -/+ one step.\n"

@@ -104,16 +104,22 @@ from cubic Bézier curves, tapered profile sweeps, and planar polygons with hole
 Curve tolerances and profile segment counts control generated detail. Earcut
 v2.2.4 is vendored under ISC for polygon triangulation; builds remain offline.
 See [the library comparison, API, limitations, and measurements](design/GEOMETRY.md).
-Tree generation is the next stage and is not implemented yet.
+The C++ tree-gen port consumes this engine and includes 20 species presets,
+separate branch skeletons and foliage, and configurable mesh detail. See
+[tree generation, Blender comparisons, and benchmarks](design/TREES.md).
+The port is GPLv3; [NOTICE](NOTICE) and [COPYING](COPYING) describe attribution
+and the license included with the combined application.
 
 ```sh
 ./build/yard --geometry-demo --date 2026-09-15 --time 12
 make geometry-bench
+./build/yard --tree quaking_aspen --date 2026-09-15 --time 12
+make tree-bench
 ```
 
 The demo adds a curved sweep and holed panel with UV checkers. The default cube
-also uses generated polygon meshes. Smoke mode includes all three; only the cube
-has an analytic ground shadow. `make test` includes CPU geometry tests.
+also uses generated polygon meshes. Smoke mode includes all three and a fan palm; only the cube
+has an analytic ground shadow. `make test` includes CPU geometry and tree tests.
 
 ## Camera exposure
 
@@ -193,6 +199,7 @@ samples with eight sun samples each per fragment; a cached sky lookup texture
 is a possible optimization as the yard grows.
 
 - `src/main.cpp`: application lifecycle, geometry demo, rendering, and input.
+- `src/tree.cpp`: tree-gen algorithm, owned branch skeletons, and tree meshes.
 - `src/geometry.cpp`: curve sampling, profile sweeps, and polygon tessellation.
 - `src/astronomy.cpp`: sun/moon ephemeris and local calendar conversion.
 - `src/skyglow.cpp`: offline site profiles and location-dependent night lighting.

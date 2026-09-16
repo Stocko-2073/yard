@@ -10,13 +10,13 @@ SHADER_LANGS := metal_macos:metal_ios:metal_sim:hlsl5:glsl430:glsl300es:wgsl
 SHADER_HEADER := build/generated/cube.glsl.h
 
 .DELETE_ON_ERROR:
-.PHONY: all run smoke-test test clean setup-tools shaders geometry-bench
+.PHONY: all run smoke-test test clean setup-tools shaders geometry-bench tree-bench
 all: build/yard
 
 build:
 	mkdir -p build
 
-build/main.o: src/main.cpp src/geometry.h src/astronomy.h src/skyglow.h src/camera.h $(HEADERS) $(SHADER_HEADER) | build
+build/main.o: src/main.cpp src/tree.h src/tree_params.inc src/geometry.h src/astronomy.h src/skyglow.h src/camera.h $(HEADERS) $(SHADER_HEADER) | build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
 build/sokol.o: src/sokol.m $(HEADERS) | build
@@ -31,7 +31,7 @@ build/skyglow.o: src/skyglow.cpp src/skyglow.h src/astronomy.h | build
 build/camera.o: src/camera.cpp src/camera.h | build
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-build/yard: build/geometry.o build/main.o build/sokol.o build/astronomy.o build/skyglow.o build/camera.o
+build/yard: build/tree.o build/geometry.o build/main.o build/sokol.o build/astronomy.o build/skyglow.o build/camera.o
 	$(CXX) $^ $(FRAMEWORKS) -o $@
 
 run: build/yard
@@ -49,11 +49,12 @@ build/skyglow-test: tests/skyglow_test.cpp src/skyglow.cpp src/skyglow.h src/ast
 build/camera-test: tests/camera_test.cpp src/camera.cpp src/camera.h | build
 	$(CXX) $(CXXFLAGS) -Isrc tests/camera_test.cpp src/camera.cpp -o $@
 
-test: build/astronomy-test build/skyglow-test build/camera-test build/geometry-test
+test: build/astronomy-test build/skyglow-test build/camera-test build/geometry-test build/tree-test
 	./build/astronomy-test
 	./build/skyglow-test
 	./build/camera-test
 	./build/geometry-test
+	./build/tree-test
 	PYTHONDONTWRITEBYTECODE=1 python3 tests/skyglow_import_test.py
 
 clean:
@@ -84,3 +85,16 @@ build/geometry-bench: tools/geometry-bench.cpp src/geometry.cpp src/geometry.h v
 
 geometry-bench: build/geometry-bench
 	./build/geometry-bench
+
+TREE_DATA := src/tree_params.inc src/tree_presets.inc src/tree_shapes.inc src/tree_validate.inc
+build/tree.o: src/tree.cpp src/tree.h $(TREE_DATA) | build
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+build/tree-bench: tools/tree-bench.cpp src/tree.cpp src/tree.h $(TREE_DATA) src/geometry.cpp src/geometry.h vendor/earcut/earcut.hpp | build
+	$(CXX) -std=c++20 -O3 -DNDEBUG -Wall -Wextra -Wpedantic -Isrc -isystem vendor/earcut tools/tree-bench.cpp src/tree.cpp src/geometry.cpp -o $@
+
+tree-bench: build/tree-bench
+	./build/tree-bench
+
+build/tree-test: tests/tree_test.cpp src/tree.cpp src/tree.h $(TREE_DATA) src/geometry.cpp src/geometry.h vendor/earcut/earcut.hpp | build
+	$(CXX) $(CXXFLAGS) -Isrc -isystem vendor/earcut tests/tree_test.cpp src/tree.cpp src/geometry.cpp -o $@

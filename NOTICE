@@ -1,0 +1,21 @@
+Yard tree generation incorporates and adapts tree-gen:
+https://github.com/friggog/tree-gen
+Copyright its authors, Charlie Hewitt and Sami Pflibsen-Jones.
+Pinned revision: 01e872182a0f955349e51bb1a68ed4dfd665f81c.
+
+The C++ adaptation and generated preset/foliage data in src/tree* are distributed
+under the GNU General Public License version 3. See COPYING and
+vendor/tree-gen/LICENSE. Yard's combined executable includes this GPLv3 code;
+redistribution of that executable must comply with GPLv3. Existing third-party
+components retain their respective licenses (Sokol: zlib; Earcut: ISC).
+
+The original algorithm, all species presets, turtle, foliage and utilities are
+preserved unmodified in vendor/tree-gen for attribution and reproducible Blender
+comparisons. The Blender user interface is not part of the port. Port changes
+include C++ owned data, deterministic local random state, parent-linked skeletons,
+Yard coordinate conversion, resource validation/budgets, and geometry-engine
+sweeps/polygon tessellation replacing Blender's geometry operations.
+
+Upstream's README also states that generated models may be used in any context
+apart from direct sale as assets. Its original wording is retained in
+vendor/tree-gen/README.md. Yard does not add asset licensing terms here.
