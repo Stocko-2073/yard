@@ -124,7 +124,7 @@ in vec3 world_normal;
 in vec2 surface_uv;
 out vec4 frag_color;
 void main() {
-    vec3 n = normalize(world_normal);
+    vec3 n = normalize(world_normal) * (gl_FrontFacing ? 1.0 : -1.0);
     float checker = mod(floor(surface_uv.x*8.0)+floor(surface_uv.y*8.0), 2.0);
     vec3 albedo = pow(face_color, vec3(2.2)) * mix(1.0, 0.8, checker);
     frag_color = vec4(display_color(surface_light(albedo, n, sun_direction.xyz,
