@@ -97,6 +97,24 @@ a published position example, and calendar/DST boundaries, without a GUI.
 moon dates on Metal, then exits; it requires a graphical macOS session and checks
 rendering execution, not visual correctness. `make clean` removes build output.
 
+## Procedural geometry
+
+The standalone C++ geometry engine generates indexed meshes with normals and UVs
+from cubic Bézier curves, tapered profile sweeps, and planar polygons with holes.
+Curve tolerances and profile segment counts control generated detail. Earcut
+v2.2.4 is vendored under ISC for polygon triangulation; builds remain offline.
+See [the library comparison, API, limitations, and measurements](design/GEOMETRY.md).
+Tree generation is the next stage and is not implemented yet.
+
+```sh
+./build/yard --geometry-demo --date 2026-09-15 --time 12
+make geometry-bench
+```
+
+The demo adds a curved sweep and holed panel with UV checkers. The default cube
+also uses generated polygon meshes. Smoke mode includes all three; only the cube
+has an analytic ground shadow. `make test` includes CPU geometry tests.
+
 ## Camera exposure
 
 Manual controls follow the OV2640's line-based shutter and Espressif gain steps.
@@ -174,7 +192,8 @@ a general scene will need a scene shadow system. The sky integrates 16 view
 samples with eight sun samples each per fragment; a cached sky lookup texture
 is a possible optimization as the yard grows.
 
-- `src/main.cpp`: application lifecycle, cube geometry, rendering, and input.
+- `src/main.cpp`: application lifecycle, geometry demo, rendering, and input.
+- `src/geometry.cpp`: curve sampling, profile sweeps, and polygon tessellation.
 - `src/astronomy.cpp`: sun/moon ephemeris and local calendar conversion.
 - `src/skyglow.cpp`: offline site profiles and location-dependent night lighting.
 - `src/camera.cpp`: camera profiles, manual exposure, and gain response.
@@ -185,6 +204,7 @@ is a possible optimization as the yard grows.
 - `build/generated/cube.glsl.h`: generated shader sources, uniform types, and
   binding declarations; do not edit or commit.
 - `tools/setup-shdc.sh`: explicit compiler download pinned by commit and SHA-256.
+- `vendor/earcut/`: unmodified Earcut v2.2.4 header, ISC license, and revision.
 - `vendor/sokol/`: Sokol headers and upstream license, pinned to commit
   `c0db757ea10cbe40aa8398aa378b2b5aae0278b2` (also recorded in `REVISION`).
 

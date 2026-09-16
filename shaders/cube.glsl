@@ -90,8 +90,12 @@ layout(binding=0) uniform vs_params {
 @include_block camera
 in vec3 position;
 in vec3 color;
+in vec3 normal;
+in vec2 uv;
 out vec3 face_color;
 out vec3 world_position;
+out vec3 world_normal;
+out vec2 surface_uv;
 void main() {
     float c = cos(view.w), s = sin(view.w);
     world_position = vec3(c*position.x+s*position.z, position.y+1.0,
@@ -101,6 +105,8 @@ void main() {
     gl_Position = vec4(lens.x*p.x/view.z, lens.x*p.y,
                       (1000.0/999.9)*p.z - 100.0/999.9, p.z);
     face_color = color;
+    world_normal = vec3(c*normal.x+s*normal.z, normal.y, -s*normal.x+c*normal.z);
+    surface_uv = uv;
 }
 @end
 
@@ -114,13 +120,13 @@ layout(binding=1) uniform light_params {
 @include_block lighting
 in vec3 face_color;
 in vec3 world_position;
+in vec3 world_normal;
+in vec2 surface_uv;
 out vec4 frag_color;
 void main() {
-    // Derivatives provide flat world normals without another vertex stream.
-    vec3 n = normalize(cross(dFdx(world_position), dFdy(world_position)));
-    // Orient outwards independently of backend framebuffer Y convention.
-    if (dot(n, world_position-vec3(0,1,0)) < 0.0) n = -n;
-    vec3 albedo = pow(face_color, vec3(2.2));
+    vec3 n = normalize(world_normal);
+    float checker = mod(floor(surface_uv.x*8.0)+floor(surface_uv.y*8.0), 2.0);
+    vec3 albedo = pow(face_color, vec3(2.2)) * mix(1.0, 0.8, checker);
     frag_color = vec4(display_color(surface_light(albedo, n, sun_direction.xyz,
                                                 sun_color.xyz, 1.0, night_radiance.xyz), camera_exposure.x), 1);
 }
