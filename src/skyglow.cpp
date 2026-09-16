@@ -10,7 +10,7 @@ const yard_site yard_default_site = {YARD_LATITUDE, YARD_LONGITUDE, 2025, 5.4424
 bool yard_site_load(const char *path, yard_site *site) {
     FILE *file = fopen(path, "r");
     if (!file) return false;
-    yard_site candidate = {0};
+    yard_site candidate = {};
     char line[512], tag[32], extra;
     bool valid = fgets(line, sizeof(line), file) &&
         sscanf(line, "%31s %lf %lf %d %lf %c", tag, &candidate.latitude,

@@ -37,7 +37,7 @@ static int compare_edges(const void *a,const void *b) {
     return (x>y)-(x<y);
 }
 static void check_closed(const yard_mesh *m) {
-    uint64_t *edges=malloc(m->index_count*sizeof(*edges));
+    uint64_t *edges=static_cast<uint64_t*>(malloc(m->index_count*sizeof(*edges)));
     assert(edges);
     for (size_t i=0; i<m->index_count; i+=3) for (int j=0; j<3; ++j) {
         uint32_t a=m->indices[i+j], b=m->indices[i+(j+1)%3];
@@ -52,7 +52,7 @@ static void check_closed(const yard_mesh *m) {
 }
 static void plane(int step) {
     const int nx=17,ny=32,nz=22;
-    uint8_t *d=malloc((size_t)nx*ny*nz);
+    uint8_t *d=static_cast<uint8_t*>(malloc((size_t)nx*ny*nz));
     assert(d);
     for (int z=0; z<nz; ++z) for (int x=0; x<nx; ++x) for (int y=0; y<ny; ++y)
         d[((size_t)z*nx+x)*ny+y]=encode(12.3f+0.04f*x+0.02f*z-y);
@@ -68,7 +68,7 @@ static void plane(int step) {
 }
 static void sphere(int step) {
     const int n=25;
-    uint8_t *d=malloc((size_t)n*n*n);
+    uint8_t *d=static_cast<uint8_t*>(malloc((size_t)n*n*n));
     assert(d);
     for (int z=0; z<n; ++z) for (int x=0; x<n; ++x) for (int y=0; y<n; ++y) {
         float a=x-12.2f,b=y-12.2f,c=z-12.2f;

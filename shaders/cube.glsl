@@ -134,19 +134,41 @@ void main() {
 }
 @end
 
+@vs object_vs
+@glsl_options fixup_clipspace
+@include_block scene_view
+@include_block camera
+in vec3 position;
+in vec3 normal;
+in vec3 color;
+in vec2 uv;
+out vec3 world_normal;
+out vec3 face_color;
+out vec2 surface_uv;
+out float surface_depth;
+void main() {
+    vec3 p=transpose(camera_basis(view.xy))*(position-camera_position.xyz);
+    gl_Position=vec4(lens.x*p.x/view.z,lens.x*p.y,(1000.0/999.9)*p.z-100.0/999.9,p.z);
+    world_normal=normal;face_color=color;surface_uv=uv;surface_depth=p.z;
+}
+@end
 @fs object_fs
 @include_block scene_light
 @include_block lighting
 in vec3 world_normal;
-in vec3 world_position;
+in vec3 face_color;
+in vec2 surface_uv;
 in float surface_depth;
 out vec4 frag_color;
 void main() {
-    frag_color=vec4(surface_light(vec3(0.55),normalize(world_normal),
-        sun_direction.xyz,sun_color.xyz,1.0,night_radiance.xyz),surface_depth);
+    vec3 n=normalize(world_normal)*(gl_FrontFacing ? 1.0 : -1.0);
+    float checker=mod(floor(surface_uv.x*8.0)+floor(surface_uv.y*8.0),2.0);
+    vec3 albedo=pow(face_color,vec3(2.2))*mix(1.0,0.8,checker);
+    // Keep linear radiance and forward depth for grass-volume occlusion.
+    frag_color=vec4(surface_light(albedo,n,sun_direction.xyz,sun_color.xyz,1.0,night_radiance.xyz),surface_depth);
 }
 @end
-@program object vs object_fs
+@program object object_vs object_fs
 
 @vs sky_vs
 @glsl_options fixup_clipspace

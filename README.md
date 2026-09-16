@@ -16,6 +16,7 @@ The planned environment includes:
 
 ## Running the scaffold on macOS
 
+The application and native tests use C++20; Sokol uses Objective-C with ARC.
 Requires Apple's command-line developer tools (`xcode-select --install`) or
 Xcode, and an Apple Silicon Mac with Metal support. Install the pinned shader
 compiler once with `make setup-tools` (requires network). Subsequent builds work
@@ -325,6 +326,24 @@ connectivity, outward winding, normals, indices, density and navigation heights.
 The lookup tables are vendored from [PyMCubes](vendor/marching_cubes/README.md)
 under its accompanying BSD license; normal builds remain offline.
 
+## Generated objects
+
+The application now builds as C++20 alongside the merged geometry engine and
+tree-gen port. `--tree SPECIES` places a generated tree at the terrain surface;
+`--geometry-demo` adds the sweep and holed-panel examples. Trees, cube, terrain and
+grass all use the same HDR/depth, supersampling and optional volume-composite path.
+
+```sh
+./build/yard --tree quaking_aspen --date 2026-09-15 --time 12
+make tree-bench
+make geometry-bench
+```
+
+See [geometry](design/GEOMETRY.md) and [tree generation](design/TREES.md).
+The tree port is GPLv3; [NOTICE](NOTICE) and [COPYING](COPYING) preserve attribution
+and licensing for the combined application. Other vendored components retain
+their original licenses.
+
 ## Camera exposure
 
 Manual controls follow the OV2640's line-based shutter and Espressif gain steps.
@@ -402,14 +421,14 @@ self-shadowing or ambient occlusion yet. The sky integrates 16 view
 samples with eight sun samples each per fragment; a cached sky lookup texture
 is a possible optimization as the yard grows.
 
-- `src/main.c`: application lifecycle, rendering, and input.
-- `src/terrain.c`: dense centimeter density generation and height queries.
-- `src/marching_cubes.c`: interpolated surface extraction, shared vertices and gradient normals.
-- `src/astronomy.c`: sun/moon ephemeris and local calendar conversion.
-- `src/skyglow.c`: offline site profiles and location-dependent night lighting.
-- `src/camera.c`: camera profiles, manual exposure, and gain response.
+- `src/main.cpp`: application lifecycle, rendering, and input.
+- `src/terrain.cpp`: dense centimeter density generation and height queries.
+- `src/marching_cubes.cpp`: interpolated surface extraction, shared vertices and gradient normals.
+- `src/astronomy.cpp`: sun/moon ephemeris and local calendar conversion.
+- `src/skyglow.cpp`: offline site profiles and location-dependent night lighting.
+- `src/camera.cpp`: camera profiles, manual exposure, and gain response.
 - `tools/fetch-skyglow.py`: explicit numeric atlas download and site sampling.
-- `tests/astronomy_test.c`: astronomy reference and calendar regression checks.
+- `tests/astronomy_test.cpp`: astronomy reference and calendar regression checks.
 - `src/sokol.m`: Sokol implementation compiled as Objective-C for macOS/Metal.
 - `shaders/cube.glsl`: portable annotated GLSL, compiled by `sokol-shdc`.
 - `build/generated/cube.glsl.h`: generated shader sources, uniform types, and

@@ -3,7 +3,7 @@
 The original XIAO ESP32-S3 Sense with **OV2640 at 800×600 SVGA** is Yard's
 medium-term camera target. The built-in `ov2640-svga` profile remains the default.
 Resolution, capture cadence, line timing, shutter range, gain steps, and render
-calibration live in `src/camera.c` rather than in scene lighting. Other cameras
+calibration live in `src/camera.cpp` rather than in scene lighting. Other cameras
 can use a profile file without changing the shaders. The lens remains separate:
 `--vfov` supplies vertical FOV; the current 60° default is uncalibrated.
 

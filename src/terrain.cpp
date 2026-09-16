@@ -18,11 +18,11 @@ static float noise(float x, float z) {
 }
 
 bool yard_terrain_create(yard_terrain *t, int size) {
-    *t = (yard_terrain){.size = size};
+    *t = yard_terrain{.size = size, .voxels = nullptr, .heights = nullptr, .mesh = {}};
     if (size < 2 || size > YARD_TERRAIN_SIZE) return false;
     size_t columns = (size_t)size*size;
-    t->voxels = malloc(columns*YARD_TERRAIN_DEPTH);
-    t->heights = malloc(columns*sizeof(*t->heights));
+    t->voxels = static_cast<uint8_t*>(malloc(columns*YARD_TERRAIN_DEPTH));
+    t->heights = static_cast<float*>(malloc(columns*sizeof(*t->heights)));
     if (!t->voxels || !t->heights) goto fail;
     for (int z=0; z<size; ++z) for (int x=0; x<size; ++x) {
         float wx=(x+0.5f-size*0.5f)*0.01f, wz=(z+0.5f-size*0.5f)*0.01f;
@@ -71,5 +71,5 @@ float yard_terrain_height(const yard_terrain *t, float x, float z) {
 }
 void yard_terrain_destroy(yard_terrain *t) {
     yard_mesh_destroy(&t->mesh);
-    free(t->voxels); free(t->heights); *t=(yard_terrain){0};
+    free(t->voxels); free(t->heights); *t=yard_terrain{};
 }

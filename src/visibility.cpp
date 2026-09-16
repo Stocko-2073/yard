@@ -60,10 +60,10 @@ bool yard_draw_layout_create(yard_draw_layout *l, yard_terrain *t) {
     memset(l,0,sizeof(*l));
     int side = (t->size+YARD_DRAW_CELLS-1)/YARD_DRAW_CELLS;
     l->count = side*side;
-    l->regions = calloc((size_t)l->count,sizeof(*l->regions));
-    l->roots = malloc((size_t)t->size*t->size*sizeof(float));
-    uint32_t *indices = malloc(t->mesh.index_count*sizeof(uint32_t));
-    int *cursor = calloc((size_t)l->count,sizeof(int));
+    l->regions = static_cast<yard_draw_region*>(calloc((size_t)l->count,sizeof(*l->regions)));
+    l->roots = static_cast<float*>(malloc((size_t)t->size*t->size*sizeof(float)));
+    uint32_t *indices = static_cast<uint32_t*>(malloc(t->mesh.index_count*sizeof(uint32_t)));
+    int *cursor = static_cast<int*>(calloc((size_t)l->count,sizeof(int)));
     if (!l->regions || !l->roots || !indices || !cursor) {
         free(indices); free(cursor); yard_draw_layout_destroy(l); return false;
     }

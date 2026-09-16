@@ -38,7 +38,7 @@ static bool vertex(yard_mesh *m, const uint8_t *d, const int n[3],
         if (cap > UINT32_MAX || cap > SIZE_MAX/sizeof(*m->vertices)) return false;
         void *ptr = realloc(m->vertices, cap*sizeof(*m->vertices));
         if (!ptr) return false;
-        m->vertices = ptr; m->vertex_capacity = cap;
+        m->vertices = static_cast<yard_mesh_vertex*>(ptr); m->vertex_capacity = cap;
     }
     *index = (uint32_t)m->vertex_count++;
     yard_mesh_vertex *v = &m->vertices[*index];
@@ -61,7 +61,7 @@ static bool triangle(yard_mesh *m, uint32_t a, uint32_t b, uint32_t c) {
         if (cap > INT_MAX || cap > SIZE_MAX/sizeof(*m->indices)) return false;
         void *ptr = realloc(m->indices,cap*sizeof(*m->indices));
         if (!ptr) return false;
-        m->indices = ptr; m->index_capacity = cap;
+        m->indices = static_cast<uint32_t*>(ptr); m->index_capacity = cap;
     }
     m->indices[m->index_count++] = a;
     m->indices[m->index_count++] = b;
@@ -70,7 +70,7 @@ static bool triangle(yard_mesh *m, uint32_t a, uint32_t b, uint32_t c) {
 }
 bool yard_marching_cubes(yard_mesh *m, const uint8_t *d,
                         int nx, int ny, int nz, int step) {
-    *m = (yard_mesh){0};
+    *m = yard_mesh{};
     if (!d || nx<2 || ny<2 || nz<2 || step<1 || step>16) return false;
     const int n[3] = {nx,ny,nz};
     int cells[3];
@@ -78,7 +78,7 @@ bool yard_marching_cubes(yard_mesh *m, const uint8_t *d,
     /* Two rolling edge-cache planes share vertices across all cells. */
     size_t plane = (size_t)(cells[0]+1)*(cells[1]+1)*3;
     if (plane > SIZE_MAX/(2*sizeof(uint32_t))) return false;
-    uint32_t *cache = malloc(2*plane*sizeof(*cache));
+    uint32_t *cache = static_cast<uint32_t*>(malloc(2*plane*sizeof(*cache)));
     if (!cache) return false;
     memset(cache,255,2*plane*sizeof(*cache));
     for (int z=0; z<cells[2]; ++z) {
@@ -120,5 +120,5 @@ fail:
     free(cache); yard_mesh_destroy(m); return false;
 }
 void yard_mesh_destroy(yard_mesh *m) {
-    free(m->vertices); free(m->indices); *m = (yard_mesh){0};
+    free(m->vertices); free(m->indices); *m = yard_mesh{};
 }

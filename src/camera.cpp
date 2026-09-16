@@ -31,7 +31,7 @@ static bool read_integer(FILE *file, int *out) {
 bool yard_camera_profile_load(const char *path, yard_camera_profile *out) {
     FILE *f = fopen(path, "r");
     if (!f) return false;
-    yard_camera_profile p = {0};
+    yard_camera_profile p = {};
     char tag[32], extra;
     bool valid = fscanf(f, "%31s %31s", tag, p.name) == 2 &&
         read_integer(f, &p.width) && read_integer(f, &p.height) &&

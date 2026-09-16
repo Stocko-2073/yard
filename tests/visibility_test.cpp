@@ -46,7 +46,7 @@ static void layout_test(void) {
     yard_terrain t;
     assert(yard_terrain_create(&t,257)); /* Includes 1-cell-wide edge regions. */
     size_t n=t.mesh.index_count;
-    uint32_t *before=malloc(n*sizeof(*before));
+    uint32_t *before=static_cast<uint32_t*>(malloc(n*sizeof(*before)));
     memcpy(before,t.mesh.indices,n*sizeof(*before));
     yard_draw_layout l;
     assert(yard_draw_layout_create(&l,&t));
