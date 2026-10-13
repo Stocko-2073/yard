@@ -24,6 +24,10 @@ def tile_location(latitude, longitude):
 
 
 def decode_sample(raw, col, row):
+    # One high byte, then 600x600 signed cells west to east, south to north. Cell
+    # (0,0) is 128*a[0]+a[1]; other first-column cells are deltas from the cell to
+    # the south, the rest deltas from the cell to the west. The LPI conversion is
+    # the atlas author's.
     if len(raw) != 360001 or not 0 <= col < 600 or not 0 <= row < 600:
         raise ValueError('invalid atlas tile or cell')
     a = memoryview(raw).cast('b')

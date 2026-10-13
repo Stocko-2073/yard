@@ -6,9 +6,10 @@
 #include <stdio.h>
 #include <string.h>
 
-// OV2640 SVGA: nominal 672 line periods/frame. 30 fps is a simulator assumption.
-// Gains decode the Espressif OV2640 table via the datasheet GAIN formula.
-// Sources, timing assumptions, and render calibration: design/CAMERA.md.
+// OV2640 SVGA: 672 line periods per frame (datasheet v1.6, fig. 16); the line
+// time assumes 30 fps and is unmeasured. AEC 0-1200 matches Espressif's
+// esp32-camera driver, and its gain table decodes to 1x-31x via the datasheet
+// GAIN formula.
 const yard_camera_profile yard_ov2640_svga = {
     .name = "ov2640-svga", .width = 800, .height = 600,
     .fps = 30, .line_us = 1000000.0 / (30.0 * 672.0),
