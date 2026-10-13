@@ -47,7 +47,7 @@ def status(stream):
     stream.command('WIFI_STATUS')
     result = stream.record()
     if result.get('type') != 'wifi_status':
-        raise ValueError('expected Wi-Fi status; flash the Wi-Fi firmware first')
+        raise ValueError('camera did not report Wi-Fi status')
     return result
 
 

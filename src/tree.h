@@ -10,8 +10,6 @@ using geometry::Vec3;
 struct Parameters {
 #include "tree_params.inc"
 };
-struct Preset { std::string_view name; Parameters parameters; };
-std::span<const Preset> species();
 Parameters preset(std::string_view name); // throws for unknown names
 inline constexpr std::size_t no_parent = static_cast<std::size_t>(-1);
 struct Point {

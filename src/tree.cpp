@@ -83,6 +83,7 @@ Vec3 track(Vec3 v,Vec3 direction) {
     Vec3 y=unit(cross(z,x));
     return x*v.x+y*v.y+z*v.z;
 }
+struct Preset { std::string_view name; Parameters parameters; };
 #include "tree_presets.inc"
 struct Stem {
     unsigned depth=0;
@@ -487,7 +488,6 @@ geometry::Mesh leaf_template(int shape,double scale,double scale_x) {
     return result;
 }
 } // namespace
-std::span<const Preset> species() {return presets;}
 Parameters preset(std::string_view name) {
     for(const auto& s:presets)if(s.name==name)return s.parameters;
     throw std::invalid_argument("unknown tree species: "+std::string(name));

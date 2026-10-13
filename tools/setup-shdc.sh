@@ -2,7 +2,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then
-    echo 'This bootstrap currently supports Apple Silicon macOS only.' >&2
+    echo 'This bootstrap supports Apple Silicon macOS only.' >&2
     exit 1
 fi
 revision=11d0cf678105d614d675e6d9bd2aaf3eeff12f8c

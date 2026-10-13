@@ -88,7 +88,7 @@ def inspect(record, base, protected):
     return None
 
 
-def cleanup(repo, repository, apply=False, protected=None):
+def cleanup(repo, repository, apply=False):
     records = worktrees(repo)
     if not records or 'bare' in records[0]:
         raise ValueError('a non-bare main checkout is required')
@@ -96,7 +96,7 @@ def cleanup(repo, repository, apply=False, protected=None):
     root = base / '.worktrees'
     if root.is_symlink():
         raise ValueError('.worktrees must not be a symlink')
-    protected = protected if protected is not None else [Path.cwd().resolve(), Path(__file__).resolve()]
+    protected = [Path.cwd().resolve(), Path(__file__).resolve()]
     errors = 0
     for record in records[1:]:
         path = Path(record['worktree'])
