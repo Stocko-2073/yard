@@ -100,7 +100,6 @@ def cleanup(repo, repository, apply=False, protected=None):
     errors = 0
     for record in records[1:]:
         path = Path(record['worktree'])
-        # Only registered worktrees under this repository's .worktrees are in scope.
         if not inside(path.absolute(), root):
             continue
         try:

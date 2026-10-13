@@ -77,8 +77,7 @@ static struct {
 } state;
 
 static void sunlight(const double direction[3], float color[4], double intensity) {
-    // Same spherical atmosphere and quadrature as the sky shader, evaluated
-    // once per frame for the directional light at ground level.
+    // CPU copy of the sky shader's sun_transmittance, for the directional light.
     double radius = 6360.0025, b = radius * direction[1];
     double step = (-b + sqrt(b*b - radius*radius + 6460.0*6460.0)) / 8.0;
     double depth_r = 0, depth_m = 0;
@@ -111,7 +110,7 @@ static void make_objects() {
         }
         for (auto i : mesh.indices) indices.push_back(base+i);
     };
-    // Keep PR #7's half-metre occlusion reference cube, embedded in the soil.
+    // Half-metre reference cube for judging scale, occlusion and shadows.
     const float bottom=yard_terrain_height(&state.terrain,0,0)-.08f;
     const std::array<Ring,1> square{Ring{{0,0},{.5f,0},{.5f,.5f},{0,.5f}}};
     const Vec3 origins[]={{-.25f,bottom,-.25f},{.25f,bottom,-.25f},
@@ -211,7 +210,7 @@ static void make_shadows() {
 }
 
 static shadow_params_t shadow_projection(const float* sun) {
-    // Orthonormal light axes; fixed center/extent, independent of viewer/culling.
+    // Fixed world-space center and extent: camera motion never moves the shadow grid.
     const float length=hypotf(sun[0],sun[2]);
     shadow_params_t p{};
     if(length>0.0001f) {p.shadow_right[0]=-sun[2]/length;p.shadow_right[2]=sun[0]/length;}
@@ -531,9 +530,8 @@ static void frame(void) {
     float dt = (float)fmin(sapp_frame_duration(), 0.1);
     if (!state.paused) state.utc += dt * 360.0; // Four minutes per day.
     state.utc += dt * 7200.0 * ((int)state.keys[SAPP_KEYCODE_RIGHT] - (int)state.keys[SAPP_KEYCODE_LEFT]);
-    // Keep the calendar within the documented range of this visual ephemeris.
+    // 1900 through 2100 in America/New_York.
     state.utc = fmax(-2208970800.0, fmin(4133998799.0, state.utc));
-    // Viewer follows the voxel surface; no rigid-body controller or collision solver.
     float forward = (float)((int)state.keys[SAPP_KEYCODE_W] - (int)state.keys[SAPP_KEYCODE_S]);
     float right = (float)((int)state.keys[SAPP_KEYCODE_D] - (int)state.keys[SAPP_KEYCODE_A]);
     float length = hypotf(forward, right);
@@ -697,7 +695,7 @@ static void frame(void) {
         sg_end_pass();
         ++state.captures;
     }
-    // Letterbox the fixed sensor image. Window size never changes its intrinsics.
+    // Letterbox only: the window never changes the sensor image or its projection.
     int window_width = sapp_width(), window_height = sapp_height();
     float scale = fminf((float)window_width/state.camera.profile.width, (float)window_height/state.camera.profile.height);
     int width = (int)(state.camera.profile.width*scale), height = (int)(state.camera.profile.height*scale);
@@ -809,7 +807,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     state.lod_start=6;
     state.lod_end=18;
     state.eye_height = 1.6f;
-    state.vertical_fov = 60.0f; // XIAO Sense OV2640 stock lens FOV is not yet calibrated.
+    state.vertical_fov = 60.0f; // Uncalibrated: the OV2640 stock lens FOV is unknown.
     state.utc = (double)time(nullptr);
     state.position[2] = state.yard_demo ? 18 : 8;
     state.pitch = state.yard_demo ? .08f : -.10f;

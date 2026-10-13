@@ -29,7 +29,7 @@ for path in sorted((source / 'parametric/tree_params').glob('*.py')):
     values = assignment(path, 'params')
     presets += f'    {{"{path.stem}", [] {{ Parameters p;\n'
     for k, v in values.items():
-        if k not in defaults:  # TreeParam ignores legacy keys such as "leaves".
+        if k not in defaults:  # TreeParam ignores keys it does not define, such as "leaves".
             continue
         presets += f'        p.{k} = {literal(v)};\n'
     presets += '        return p; }()},\n'

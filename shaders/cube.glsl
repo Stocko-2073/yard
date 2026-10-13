@@ -1,5 +1,5 @@
 @block camera
-// Camera at yard eye height. North is -Z, east is +X.
+// North is -Z, east is +X.
 mat3 camera_basis(vec2 look) {
     float cy = cos(look.x), sy = sin(look.x);
     float cp = cos(look.y), sp = sin(look.y);
@@ -64,7 +64,7 @@ vec3 atmosphere(vec3 ray, vec3 sun, vec3 night) {
     return sky + night;
 }
 vec3 display_color(vec3 linear_color, float exposure) {
-    // Integrate shutter and gain in linear space before tone mapping and 8-bit output.
+    // Narkowicz's ACES fit, then sRGB encoding.
     vec3 x = max(linear_color * exposure, vec3(0));
     vec3 mapped = clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0);
     return mix(12.92*mapped, 1.055*pow(mapped, vec3(1.0/2.4))-0.055,
@@ -72,14 +72,13 @@ vec3 display_color(vec3 linear_color, float exposure) {
 }
 vec3 surface_light(vec3 albedo, vec3 normal, vec3 sun, vec3 sunlight, float visibility, vec3 night) {
     float day = smoothstep(-0.12, 0.18, sun.y);
-    // Broad sky fill plus muted ground-facing fill, in linear render units.
-    // These hemisphere colors are an art-directed approximation, not sampled GI.
+    // Art-directed sky/ground hemisphere fill, not integrated skylight.
     float high_sun = smoothstep(0.0, 0.65, sun.y);
     vec3 sky_fill = mix(vec3(0.10,0.115,0.15),vec3(0.18,0.215,0.25),high_sun);
     vec3 ground_fill = mix(vec3(0.025,0.027,0.020),vec3(0.070,0.075,0.055),high_sun);
     float up = clamp(normal.y*0.5+0.5,0.0,1.0);
     vec3 ambient = day*mix(ground_fill,sky_fill,up);
-    // Preserve the existing site-dependent night contribution and its orientation.
+    // pi * L: irradiance from a uniform sky hemisphere of radiance L.
     ambient += PI*night*mix(0.3,1.0,up);
     return albedo * (ambient + sunlight * max(dot(normal, sun), 0.0) * visibility);
 }
@@ -98,7 +97,6 @@ vec3 leaf_light(vec3 albedo,vec3 normal,vec3 sun,vec3 sunlight,float visibility,
 
 @end
 
-// Fixed world-space light projection: camera motion cannot move the shadow grid.
 @block shadow_projection
 layout(binding=3) uniform shadow_params {
     vec4 shadow_right;
@@ -139,7 +137,7 @@ float sun_visibility(vec3 world, vec3 normal, vec3 sun) {
     uv.y=1.0-uv.y;
 #endif
     if (any(lessThan(uv,vec2(0))) || any(greaterThan(uv,vec2(1))) || abs(q.z)>1.0) return 1.0;
-    // A small slope-aware receiver bias in world metres, then a continuous tent PCF.
+    // Slope-scaled receiver bias in metres, then a 4x4 tent-filtered PCF.
     float bias=(0.008+0.025*(1.0-abs(dot(normal,sun))))*shadow_origin.w*0.5;
     float depth=q.z*0.5+0.5-bias;
     ivec2 size=textureSize(sampler2D(shadow_image,shadow_sampler),0);
@@ -194,7 +192,7 @@ out float surface_depth;
 void main() {
     world_position = position;
     vec3 p = transpose(camera_basis(view.xy)) * (world_position - camera_position.xyz);
-    // Forward-positive camera coordinates; depth [0, 1].
+    // Forward-positive view space; near 0.1 m, far 1000 m, depth [0, 1].
     gl_Position = vec4(lens.x*p.x/view.z, lens.x*p.y,
                       (1000.0/999.9)*p.z - 100.0/999.9, p.z);
     world_normal = normal;
@@ -221,8 +219,8 @@ in float surface_depth;
 out vec4 frag_color;
 void main() {
     vec3 n = normalize(world_normal);
-    // #56341B is an sRGB albedo; convert to linear before lighting.
     vec3 albedo = pow((vec3(86,52,27)/255.0+0.055)/1.055, vec3(2.4));
+    // Alpha carries forward depth so the grass volume can stop at opaque surfaces.
     frag_color = vec4(surface_light(albedo,n,sun_direction.xyz,
                                    sun_color.xyz,sun_visibility(world_position,n,sun_direction.xyz),night_radiance.xyz),surface_depth);
 }
@@ -261,7 +259,6 @@ void main() {
     vec3 n=normalize(world_normal)*(gl_FrontFacing ? 1.0 : -1.0);
     float checker=mod(floor(surface_uv.x*8.0)+floor(surface_uv.y*8.0),2.0);
     vec3 albedo=material_linear(face_color.rgb)*mix(1.0,0.8,checker);
-    // Keep linear radiance and forward depth for grass-volume occlusion.
     float visibility=sun_visibility(object_position,n,sun_direction.xyz);
     vec3 lit=face_color.a>0.5
         ? leaf_light(albedo,n,sun_direction.xyz,sun_color.xyz,visibility,night_radiance.xyz)
@@ -291,7 +288,7 @@ layout(binding=2) uniform sky_params {
     vec4 sky_lens;
     vec4 sky_camera_position;
     vec4 sky_moon; // direction and angular radius
-    vec4 moon_sun; // Moon-to-Sun direction, in the same world frame
+    vec4 moon_sun; // Moon-to-Sun direction
     vec4 moon_north;
 };
 @include_block camera
@@ -314,8 +311,8 @@ vec3 lunar_disk(vec3 ray) {
     float edge = max(fwidth(r), 0.001);
     float coverage = (1.0-smoothstep(1.0-edge, 1.0+edge, r))*step(0.0, alignment);
     if (coverage <= 0.0 || ray.y <= 0.0) return vec3(0);
-    // Visible hemisphere normal; illumination from the ephemeris gives both
-    // the terminator shape and its orientation relative to the local horizon.
+    // Lighting the visible hemisphere from the ephemeris Sun direction gives the
+    // terminator both its shape and its tilt relative to the local horizon.
     tangent /= max(1.0, r);
     float facing = sqrt(max(0.0, 1.0-dot(tangent,tangent)));
     vec3 normal = tangent-center*facing;
@@ -325,7 +322,6 @@ vec3 lunar_disk(vec3 ray) {
     vec3 up = normalize(moon_north.xyz-center*dot(moon_north.xyz,center));
     vec3 right = normalize(cross(center,up));
     vec2 uv = vec2(dot(normal,right),dot(normal,up));
-    // Restrained procedural albedo variation, not a surveyed lunar surface map.
     float coarse = lunar_noise(uv*3.7+vec2(4.3,2.1));
     float detail = lunar_noise(uv*17.0)*0.6+lunar_noise(uv*43.0)*0.4;
     float maria = smoothstep(0.44, 0.64, coarse+0.12*(detail-0.5));
@@ -554,7 +550,7 @@ void main() {
     if (!clip_axis(volume_camera_position.x,ray.x,-volume_bounds.z,volume_bounds.z,enter,leave) ||
         !clip_axis(volume_camera_position.z,ray.z,-volume_bounds.z,volume_bounds.z,enter,leave) ||
         !clip_axis(volume_camera_position.y,ray.y,volume_bounds.x,volume_bounds.y,enter,leave)) return;
-    // Average the original two-sided upright leaf lighting, weighted by projected area.
+    // Blade lighting averaged over azimuth, weighted by projected area.
     vec3 direct=vec3(0), ambient=vec3(0); float weights=0;
     for (int i=0; i<16; ++i) {
         float angle=(float(i)+0.5)*PI/16.0;

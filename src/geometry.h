@@ -25,13 +25,12 @@ struct Detail {
 struct Sample { Vec3 position; float radius; };
 using Ring = std::vector<Vec2>;
 
-// All functions return owned CPU data; no renderer, tree, or physics dependency.
 // Invalid numeric/degenerate input throws invalid_argument; budgets throw length_error.
 // Simple, nonintersecting rings and non-self-intersecting sweeps are caller contracts.
 std::vector<Sample> sample_curve(std::span<const Bezier> curve, Detail detail = {});
 Ring circle_profile(unsigned segments = 12);
 // Open path, closed CCW profile (no repeated final point), positive radii.
-// Smooth side normals, split UV seam, optional flat caps. No branch junction union.
+// Smooth side normals, split UV seam, flat-shaded caps.
 Mesh sweep(std::span<const Sample> path, std::span<const Vec2> profile, bool caps = true);
 // First ring is the outer boundary; remaining rings are disjoint interior holes.
 // Plane axes must be orthonormal. Output faces toward cross(axis_u, axis_v).

@@ -19,7 +19,7 @@ typedef struct {
 void yard_frustum_make(yard_frustum *f, const float position[3], float yaw,
                        float pitch, float aspect, float focal);
 bool yard_frustum_visible(const yard_frustum *f, const yard_bounds *bounds);
-/* Reorders indices and packs heights into static draw regions. No state/LOD changes. */
+/* Reorders the terrain mesh's indices by region and packs grass root heights. */
 bool yard_draw_layout_create(yard_draw_layout *layout, yard_terrain *terrain);
 void yard_draw_layout_destroy(yard_draw_layout *layout);
 #endif

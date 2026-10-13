@@ -41,7 +41,7 @@ struct Limits {
     std::size_t branches = 250000, leaves = 4000000, points = 4000000;
 };
 // Deterministic, including seed zero. Coordinates: +Y up, -Z north (metres).
-// Generation has no render/physics state. Budgets throw rather than truncate.
+// Budgets throw rather than truncate.
 Skeleton generate(const Parameters&, std::uint32_t seed = 1, Limits = {});
 struct MeshDetail {
     geometry::Detail curve;
@@ -50,7 +50,6 @@ struct MeshDetail {
     std::size_t max_vertices = 16000000;
 };
 struct Meshes { geometry::Mesh wood, leaves, blossoms; };
-// Tessellates an existing skeleton without rerunning branch placement.
 // Independent capped sweeps overlap at junctions; they are not a manifold union.
 Meshes mesh(const Skeleton&, MeshDetail = {});
 } // namespace yard::tree

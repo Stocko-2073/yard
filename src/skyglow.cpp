@@ -36,7 +36,7 @@ void yard_night_light(const yard_site *site, double sun_y, float rgb[4]) {
                (sin(-6.0 * 0.0174532925199433) - sin(-18.0 * 0.0174532925199433));
     t = fmax(0, fmin(1, t));
     double night = 1 - t*t*(3 - 2*t);
-    // Preserve the natural sky floor's luminance; no spectrum is supplied by the atlas.
+    // The atlas gives a luminance ratio but no spectrum, so skyglow is gray.
     const double natural[3] = {0.0005, 0.0008, 0.0016};
     const double luminance = 0.2126*0.0005 + 0.7152*0.0008 + 0.0722*0.0016;
     for (int i = 0; i < 3; ++i) {

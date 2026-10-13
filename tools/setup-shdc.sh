@@ -1,5 +1,4 @@
 #!/bin/sh
-# Explicit bootstrap for this project's current Apple Silicon development host.
 set -eu
 cd "$(dirname "$0")/.."
 if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then

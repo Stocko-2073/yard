@@ -2,7 +2,6 @@
 #include <math.h>
 #include <stdlib.h>
 
-/* Seeded value noise: non-tiling over the yard, with smooth transitions. */
 static float lattice(int x, int z) {
     uint32_t h = (uint32_t)x*0x8da6b343u ^ (uint32_t)z*0xd8163841u ^ 0x71c3a52du;
     h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15; h *= 0x846ca68bu; h ^= h >> 16;

@@ -22,8 +22,7 @@ def main():
         payload = json.load(sys.stdin)
         cwd = payload.get("cwd") or os.getcwd()
         # The first porcelain record is the main worktree, even when invoked
-        # from a linked worktree or one of its subdirectories. NUL delimiters
-        # handle spaces, newlines, and non-ASCII names without shell parsing.
+        # from a linked worktree or one of its subdirectories.
         listing = git(cwd, "worktree", "list", "--porcelain", "-z")
         first = listing.split(b"\0", 1)[0]
         if not first.startswith(b"worktree "):
