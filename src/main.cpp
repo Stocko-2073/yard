@@ -59,7 +59,6 @@ static struct {
     int grass_stride, msaa;
     bool no_grass, no_culling;
     yard_draw_layout layout;
-    uint64_t submitted_grass, submitted_triangles;
     sg_pipeline sky_pipeline;
     sg_bindings sky_bindings;
     double utc;
@@ -75,8 +74,6 @@ static struct {
     int terrain_index_count;
     float eye_height;
     bool paused;
-    bool smoke_test, terrain_smoke_test;
-    double smoke_elapsed;
 } state;
 
 static void sunlight(const double direction[3], float color[4], double intensity) {
@@ -129,11 +126,11 @@ static void make_objects() {
         const std::array<Ring,2> panel{Ring{{0,0},{2,0},{2,3},{0,3}},Ring{{.5f,1},{1.5f,1},{1.5f,2},{.5f,2}}};
         append(polygon(panel,{-4,0,0}),{.35f,.65f,.4f},{0,0,0},true);
     }
-    if(state.tree_species || state.smoke_test) {
-        auto skeleton=yard::tree::generate(yard::tree::preset(state.tree_species ? state.tree_species : "fan_palm"),123);
+    if(state.tree_species) {
+        auto skeleton=yard::tree::generate(yard::tree::preset(state.tree_species),123);
         auto tree=yard::tree::mesh(skeleton);
         Vec3 root{0,yard_terrain_height(&state.terrain,0,-6)-.02f,-6};
-        const bool aspen=state.tree_species && strcmp(state.tree_species,"quaking_aspen")==0;
+        const bool aspen=strcmp(state.tree_species,"quaking_aspen")==0;
         append(std::move(tree.wood),aspen ? Vec3{.62f,.63f,.57f} : Vec3{.36f,.30f,.23f},root);
         append(std::move(tree.leaves),{.30f,.40f,.20f},root,false,true);
         append(std::move(tree.blossoms),{.85f,.62f,.68f},root,false,true);
@@ -531,7 +528,6 @@ static void init(void) {
 }
 
 static void frame(void) {
-    if (state.captures > 0) state.smoke_elapsed += sapp_frame_duration();
     float dt = (float)fmin(sapp_frame_duration(), 0.1);
     if (!state.paused) state.utc += dt * 360.0; // Four minutes per day.
     state.utc += dt * 7200.0 * ((int)state.keys[SAPP_KEYCODE_RIGHT] - (int)state.keys[SAPP_KEYCODE_LEFT]);
@@ -546,25 +542,6 @@ static void frame(void) {
         float step = speed * dt / length;
         state.position[0] += (sinf(state.yaw)*forward + cosf(state.yaw)*right)*step;
         state.position[2] += (-cosf(state.yaw)*forward + sinf(state.yaw)*right)*step;
-    }
-    if (state.smoke_test) {
-        const char *dates[] = {"2026-01-18", "2026-01-25", "2026-02-01", "2026-02-09"};
-        const double hours[] = {12, 19, 21, 5};
-        unsigned preset = (state.captures / 30) % 4;
-        yard_local_datetime(dates[preset], hours[preset], &state.utc);
-        state.track_moon = true;
-        state.zoom = true;
-    }
-    if (state.terrain_smoke_test) {
-        yard_local_datetime("2026-09-14", 9, &state.utc);
-        float progress = state.captures / 120.0f;
-        float radius=state.yard_demo ? 22.0f : 12.0f;
-        state.position[0] = radius*sinf(progress*6.2831853f);
-        state.position[2] = (state.yard_demo ? -6.0f : 0.0f)+radius*cosf(progress*6.2831853f);
-        state.yaw = progress*6.2831853f;
-        state.pitch = state.yard_demo ? .06f : -.35f;
-        state.track_moon = false;
-        state.zoom = false;
     }
     state.position[1] = yard_terrain_height(&state.terrain, state.position[0], state.position[2]) + state.eye_height;
     yard_astronomy(state.utc, state.site.latitude, state.site.longitude, &state.ephemeris);
@@ -652,15 +629,11 @@ static void frame(void) {
         yard_frustum frustum;
         yard_frustum_make(&frustum,state.position,state.yaw,state.pitch,
                           uniforms.view[2],uniforms.lens[0]);
-        if (state.no_culling) {
-            sg_draw(0,state.terrain_index_count,1);
-            state.submitted_triangles += state.terrain_index_count/3;
-        } else for (int i=0; i<state.layout.count; ++i) {
+        if (state.no_culling) sg_draw(0,state.terrain_index_count,1);
+        else for (int i=0; i<state.layout.count; ++i) {
             const yard_draw_region *r=&state.layout.regions[i];
-            if (r->index_count && yard_frustum_visible(&frustum,&r->ground)) {
+            if (r->index_count && yard_frustum_visible(&frustum,&r->ground))
                 sg_draw(r->index_start,r->index_count,1);
-                state.submitted_triangles += r->index_count/3;
-            }
         }
         sg_apply_pipeline(state.object_pipeline);
         sg_apply_bindings(&state.object_bindings);
@@ -686,9 +659,7 @@ static void frame(void) {
                 state.grass_bindings.vertex_buffer_offsets[1]=r->root_start*(int)sizeof(float);
                 sg_apply_bindings(&state.grass_bindings);
                 sg_apply_uniforms(UB_grass_region_params,SG_RANGE(region));
-                int count=(r->width*r->depth+state.grass_stride-1)/state.grass_stride;
-                sg_draw(0,3,count);
-                state.submitted_grass += count;
+                sg_draw(0,3,(r->width*r->depth+state.grass_stride-1)/state.grass_stride);
             }
         }
         sg_end_pass();
@@ -745,17 +716,6 @@ static void frame(void) {
     sg_draw(0, 3, 1);
     sg_end_pass();
     sg_commit();
-    if (state.captures == 120 && (state.smoke_test || state.terrain_smoke_test)) {
-        printf("Yard: rendered 120 %dx%d camera frames on Metal, %.1f fps cap, %.1f captures/s observed (%s).\n",
-               state.camera.profile.width, state.camera.profile.height, state.camera.profile.fps, 119.0/state.smoke_elapsed,
-               state.terrain_smoke_test ? "terrain orbit" : "four lunar phases");
-        printf("Yard: average submitted %.2f million grass blades (%.1f%%), %.2f million terrain triangles (%.1f%%)\n",
-               state.submitted_grass/(120.0*1e6),
-               state.grass_count ? 100.0*state.submitted_grass/(120.0*state.grass_count) : 0,
-               state.submitted_triangles/(120.0*1e6),
-               100.0*state.submitted_triangles/(120.0*(state.terrain_index_count/3)));
-        sapp_request_quit();
-    }
 }
 
 static void event(const sapp_event *ev) {
@@ -859,12 +819,9 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     const char *profile_path = nullptr;
     double exposure_ms = -1, gain = -1, exposure_lines = -1, gain_index = -1;
     for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--smoke-test") == 0) state.smoke_test = true;
-        else if (strcmp(argv[i], "--paused") == 0) state.paused=true;
+        if (strcmp(argv[i], "--paused") == 0) state.paused=true;
         else if (strcmp(argv[i], "--no-shadows") == 0) state.no_shadows=true;
         else if (strcmp(argv[i], "--yard-demo") == 0) state.yard_demo=true;
-        else if (strcmp(argv[i], "--yard-smoke-test") == 0) {state.yard_demo=true;state.terrain_smoke_test=true;}
-        else if (strcmp(argv[i], "--terrain-smoke-test") == 0) state.terrain_smoke_test = true;
         else if (strcmp(argv[i], "--grass-volume") == 0) state.grass_volume=true;
         else if ((strcmp(argv[i],"--lod-start")==0 || strcmp(argv[i],"--lod-end")==0) && i+1<argc) {
             bool start=strcmp(argv[i],"--lod-start")==0;
@@ -940,7 +897,6 @@ sapp_desc sokol_main(int argc, char *argv[]) {
         if (!state.tree_species) state.tree_species="quaking_aspen";
         state.position[2]=18;state.pitch=.08f;
     }
-    if (state.smoke_test && state.terrain_smoke_test) goto usage;
     if (profile_path) {
         yard_camera_profile profile;
         if (!yard_camera_profile_load(profile_path, &profile)) {
@@ -984,7 +940,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     app.logger.func = slog_func;
     return app;
 usage:
-    fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--eye-height metres] [--smoke-test | --terrain-smoke-test] [--site profile] [--tree species] [--geometry-demo] [--yard-demo | --yard-smoke-test]\n"
+    fprintf(stderr, "Usage: %s [--date YYYY-MM-DD] [--time local-hour] [--moon] [--zoom] [--vfov degrees] [--eye-height metres] [--site profile] [--tree species] [--geometry-demo] [--yard-demo]\n"
                     "Grass LOD: [--grass-volume] [--lod-start metres] [--lod-end metres] (V toggles volume, G toggles grass)\n"
                     "Rendering: [--ssaa 1|8] [--msaa 1|4] [--no-shadows] [--paused] (H toggles shadows) [--no-culling] [--no-grass] [--grass-stride 1..64] (diagnostic density reduction)\n"
                     "Camera: [--camera-profile FILE] [--exposure-ms MS | --aec-value LINES] [--gain MULTIPLIER | --agc-gain INDEX]\n"

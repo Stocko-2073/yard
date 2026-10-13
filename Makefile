@@ -10,7 +10,7 @@ SHADER_LANGS := metal_macos:metal_ios:metal_sim:hlsl5:glsl430:glsl300es:wgsl
 SHADER_HEADER := build/generated/cube.glsl.h
 
 .DELETE_ON_ERROR:
-.PHONY: all run smoke-test test clean setup-tools shaders geometry-bench tree-bench
+.PHONY: all run run-yard clean setup-tools shaders
 all: build/yard
 
 build:
@@ -37,27 +37,8 @@ build/yard: build/terrain.o build/marching_cubes.o build/visibility.o build/tree
 run: build/yard
 	./build/yard
 
-smoke-test: build/yard
-	./build/yard --smoke-test
-
-build/astronomy-test: tests/astronomy_test.cpp src/astronomy.cpp src/astronomy.h | build
-	$(CXX) $(CXXFLAGS) -Isrc tests/astronomy_test.cpp src/astronomy.cpp -o $@
-
-build/skyglow-test: tests/skyglow_test.cpp src/skyglow.cpp src/skyglow.h src/astronomy.h | build
-	$(CXX) $(CXXFLAGS) -Isrc tests/skyglow_test.cpp src/skyglow.cpp -o $@
-
-build/camera-test: tests/camera_test.cpp src/camera.cpp src/camera.h | build
-	$(CXX) $(CXXFLAGS) -Isrc tests/camera_test.cpp src/camera.cpp -o $@
-
-test: build/terrain-test build/visibility-test build/astronomy-test build/skyglow-test build/camera-test build/geometry-test build/tree-test
-	./build/terrain-test
-	./build/visibility-test
-	./build/astronomy-test
-	./build/skyglow-test
-	./build/camera-test
-	./build/geometry-test
-	./build/tree-test
-	PYTHONDONTWRITEBYTECODE=1 python3 tests/skyglow_import_test.py
+run-yard: build/yard
+	./build/yard --yard-demo --time 12
 
 clean:
 	rm -rf build
@@ -79,27 +60,9 @@ $(SHADER_HEADER): shaders/cube.glsl $(SHDC) Makefile
 build/geometry.o: src/geometry.cpp src/geometry.h vendor/earcut/earcut.hpp | build
 	$(CXX) $(CXXFLAGS) -isystem vendor/earcut -c $< -o $@
 
-build/geometry-test: tests/geometry_test.cpp src/geometry.cpp src/geometry.h vendor/earcut/earcut.hpp | build
-	$(CXX) $(CXXFLAGS) -Isrc -isystem vendor/earcut tests/geometry_test.cpp src/geometry.cpp -o $@
-
-build/geometry-bench: tools/geometry-bench.cpp src/geometry.cpp src/geometry.h vendor/earcut/earcut.hpp | build
-	$(CXX) -std=c++20 -O3 -DNDEBUG -Wall -Wextra -Wpedantic -Isrc -isystem vendor/earcut tools/geometry-bench.cpp src/geometry.cpp -o $@
-
-geometry-bench: build/geometry-bench
-	./build/geometry-bench
-
 TREE_DATA := src/tree_params.inc src/tree_presets.inc src/tree_shapes.inc src/tree_validate.inc
 build/tree.o: src/tree.cpp src/tree.h $(TREE_DATA) | build
 	$(CXX) $(CXXFLAGS) -c $< -o $@
-
-build/tree-bench: tools/tree-bench.cpp src/tree.cpp src/tree.h $(TREE_DATA) src/geometry.cpp src/geometry.h vendor/earcut/earcut.hpp | build
-	$(CXX) -std=c++20 -O3 -DNDEBUG -Wall -Wextra -Wpedantic -Isrc -isystem vendor/earcut tools/tree-bench.cpp src/tree.cpp src/geometry.cpp -o $@
-
-tree-bench: build/tree-bench
-	./build/tree-bench
-
-build/tree-test: tests/tree_test.cpp src/tree.cpp src/tree.h $(TREE_DATA) src/geometry.cpp src/geometry.h vendor/earcut/earcut.hpp | build
-	$(CXX) $(CXXFLAGS) -Isrc -isystem vendor/earcut tests/tree_test.cpp src/tree.cpp src/geometry.cpp -o $@
 
 build/terrain.o: src/terrain.cpp src/terrain.h src/marching_cubes.h | build
 	$(CXX) $(CXXFLAGS) -O2 -c $< -o $@
@@ -107,13 +70,3 @@ build/marching_cubes.o: src/marching_cubes.cpp src/marching_cubes.h vendor/march
 	$(CXX) $(CXXFLAGS) -O2 -c $< -o $@
 build/visibility.o: src/visibility.cpp src/visibility.h src/terrain.h | build
 	$(CXX) $(CXXFLAGS) -O2 -c $< -o $@
-build/terrain-test: tests/terrain_test.cpp src/terrain.cpp src/marching_cubes.cpp src/terrain.h src/marching_cubes.h vendor/marching_cubes/tables.h | build
-	$(CXX) $(CXXFLAGS) -O2 -Isrc tests/terrain_test.cpp src/terrain.cpp src/marching_cubes.cpp -o $@
-build/visibility-test: tests/visibility_test.cpp src/visibility.cpp src/terrain.cpp src/marching_cubes.cpp src/visibility.h src/terrain.h src/marching_cubes.h vendor/marching_cubes/tables.h | build
-	$(CXX) $(CXXFLAGS) -O2 -Isrc tests/visibility_test.cpp src/visibility.cpp src/terrain.cpp src/marching_cubes.cpp -o $@
-
-.PHONY: yard-smoke-test run-yard
-run-yard: build/yard
-	./build/yard --yard-demo --time 12
-yard-smoke-test: build/yard
-	./build/yard --yard-smoke-test

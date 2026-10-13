@@ -10,8 +10,8 @@ redistribution of that executable must comply with GPLv3. Existing third-party
 components retain their respective licenses (Sokol: zlib; Earcut: ISC; PyMCubes lookup tables: BSD-3-Clause).
 
 The original algorithm, all species presets, turtle, foliage and utilities are
-preserved unmodified in vendor/tree-gen for attribution and reproducible Blender
-comparisons. The Blender user interface is not part of the port. Port changes
+preserved unmodified in vendor/tree-gen for attribution and as the source of the
+generated preset data. The Blender user interface is not part of the port. Port changes
 include C++ owned data, deterministic local random state, parent-linked skeletons,
 Yard coordinate conversion, resource validation/budgets, and geometry-engine
 sweeps/polygon tessellation replacing Blender's geometry operations.
