@@ -24,8 +24,8 @@ once; after that, builds are offline.
 ```sh
 make setup-tools
 make
-make run        # sky, terrain, grass and the reference cube
-make run-yard   # the same yard with a quaking aspen, paused at noon
+make run        # sky, terrain, grass, the reference cube and a quaking aspen
+make run-yard   # the same yard framed on the aspen, paused at noon
 ```
 
 `make shaders` regenerates only the shader header, and `make clean` removes
@@ -44,10 +44,11 @@ make run-yard   # the same yard with a quaking aspen, paused at noon
 - **Grass:** one 5 cm × 5 mm blade per centimetre of surface, about 40 million in
   all, drawn as instances in 2.56 m frustum-culled regions. Optionally, a
   ray-marched 5 cm density layer replaces distant blades.
-- **Objects:** a half-metre reference cube at the origin, plus an optional tree
-  generated from any [tree-gen](https://github.com/friggog/tree-gen) preset, and
-  optional geometry-engine specimens. Objects cast sun shadows onto everything;
-  terrain and grass receive shadows but don't cast them.
+- **Objects:** a half-metre reference cube at the origin, a tree 6 m north of it
+  generated from a [tree-gen](https://github.com/friggog/tree-gen) preset (quaking
+  aspen unless `--tree` picks another), and optional geometry-engine specimens.
+  Objects cast sun shadows onto everything; terrain and grass receive shadows but
+  don't cast them.
 
 There is no collision, physics, wind or growth.
 
@@ -120,8 +121,8 @@ See [data/README.md](data/README.md) for the atlas and profile format.
 | `--site FILE` | Load a site profile for location and skyglow |
 | `--eye-height M` | Viewer height above the ground, 0.1–10 m (default 1.6) |
 | `--vfov DEGREES` | Vertical field of view, 1–170 (default 60) |
-| `--tree SPECIES` | Plant a tree-gen preset, e.g. `quaking_aspen` or `hill_cherry` |
-| `--yard-demo` | Frame a tree from 24 m away (quaking aspen unless `--tree` says otherwise) |
+| `--tree SPECIES` | Plant another tree-gen preset instead of the aspen, e.g. `hill_cherry` |
+| `--yard-demo` | Frame the tree from 24 m away |
 | `--geometry-demo` | Add a swept curve and a holed panel beside the cube |
 | `--grass-volume` | Start with the grass volume on |
 | `--lod-start M`, `--lod-end M` | Horizontal distance band where blades fade into the volume (default 6–18 m) |

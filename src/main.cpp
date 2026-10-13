@@ -125,15 +125,13 @@ static void make_objects() {
         const std::array<Ring,2> panel{Ring{{0,0},{2,0},{2,3},{0,3}},Ring{{.5f,1},{1.5f,1},{1.5f,2},{.5f,2}}};
         append(polygon(panel,{-4,0,0}),{.35f,.65f,.4f},{0,0,0},true);
     }
-    if(state.tree_species) {
-        auto skeleton=yard::tree::generate(yard::tree::preset(state.tree_species),123);
-        auto tree=yard::tree::mesh(skeleton);
-        Vec3 root{0,yard_terrain_height(&state.terrain,0,-6)-.02f,-6};
-        const bool aspen=strcmp(state.tree_species,"quaking_aspen")==0;
-        append(std::move(tree.wood),aspen ? Vec3{.62f,.63f,.57f} : Vec3{.36f,.30f,.23f},root);
-        append(std::move(tree.leaves),{.30f,.40f,.20f},root,false,true);
-        append(std::move(tree.blossoms),{.85f,.62f,.68f},root,false,true);
-    }
+    auto skeleton=yard::tree::generate(yard::tree::preset(state.tree_species),123);
+    auto tree=yard::tree::mesh(skeleton);
+    Vec3 root{0,yard_terrain_height(&state.terrain,0,-6)-.02f,-6};
+    const bool aspen=strcmp(state.tree_species,"quaking_aspen")==0;
+    append(std::move(tree.wood),aspen ? Vec3{.62f,.63f,.57f} : Vec3{.36f,.30f,.23f},root);
+    append(std::move(tree.leaves),{.30f,.40f,.20f},root,false,true);
+    append(std::move(tree.blossoms),{.85f,.62f,.68f},root,false,true);
     state.object_index_count=static_cast<int>(indices.size());
     sg_buffer_desc buffer{};
     buffer.data={vertices.data(),vertices.size()*sizeof(RenderVertex)};buffer.label="scene object vertices";
@@ -800,6 +798,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     }
     tzset();
     state.site = yard_default_site;
+    state.tree_species = "quaking_aspen";
     yard_camera_init(&state.camera, &yard_ov2640_svga);
     state.ssaa = 8;
     state.msaa = 1;
@@ -892,7 +891,6 @@ sapp_desc sokol_main(int argc, char *argv[]) {
         } else goto usage;
     }
     if (state.yard_demo) {
-        if (!state.tree_species) state.tree_species="quaking_aspen";
         state.position[2]=18;state.pitch=.08f;
     }
     if (profile_path) {
