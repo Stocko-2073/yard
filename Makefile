@@ -7,7 +7,7 @@ FRAMEWORKS := -framework Cocoa -framework QuartzCore -framework Metal -framework
 HEADERS := $(wildcard vendor/sokol/*.h)
 SHDC := tools/bin/sokol-shdc
 SHADER_LANGS := metal_macos:metal_ios:metal_sim:hlsl5:glsl430:glsl300es:wgsl
-SHADER_HEADER := build/generated/cube.glsl.h
+SHADER_HEADER := build/generated/yard.glsl.h
 
 .DELETE_ON_ERROR:
 .PHONY: all run run-yard clean setup-tools shaders
@@ -53,7 +53,7 @@ $(SHDC):
 
 shaders: $(SHADER_HEADER)
 
-$(SHADER_HEADER): shaders/cube.glsl $(SHDC) Makefile
+$(SHADER_HEADER): shaders/yard.glsl $(SHDC) Makefile
 	mkdir -p build/generated
 	$(SHDC) --input $< --output $@ --slang $(SHADER_LANGS) --ifdef
 

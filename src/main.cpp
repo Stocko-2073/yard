@@ -9,7 +9,7 @@
 #include "sokol_gfx.h"
 #include "sokol_glue.h"
 #include "sokol_log.h"
-#include "cube.glsl.h"
+#include "yard.glsl.h"
 #include "astronomy.h"
 #include "skyglow.h"
 #include "camera.h"
@@ -42,7 +42,7 @@ static struct {
     yard_camera camera;
     double capture_elapsed;
     unsigned captures;
-    sg_pipeline pipeline;
+    sg_pipeline terrain_pipeline;
     const char* tree_species;
     bool geometry_demo, yard_demo;
     int object_index_count;
@@ -69,7 +69,7 @@ static struct {
     float position[4];
     bool keys[SAPP_MAX_KEYCODES];
     int64_t title_minute;
-    sg_bindings bindings;
+    sg_bindings terrain_bindings;
     yard_terrain terrain;
     int terrain_index_count;
     float eye_height;
@@ -198,7 +198,7 @@ static void make_shadows() {
     sg_sampler_desc sampler_desc{};
     sampler_desc.wrap_u=SG_WRAP_CLAMP_TO_EDGE;sampler_desc.wrap_v=SG_WRAP_CLAMP_TO_EDGE;
     sg_sampler sampler=sg_make_sampler(sampler_desc);
-    for(sg_bindings* bindings : {&state.bindings,&state.object_bindings,&state.grass_bindings,&state.volume_bindings}) {
+    for(sg_bindings* bindings : {&state.terrain_bindings,&state.object_bindings,&state.grass_bindings,&state.volume_bindings}) {
         bindings->views[VIEW_shadow_image]=texture;
         bindings->samplers[SMP_shadow_sampler]=sampler;
     }
@@ -449,14 +449,14 @@ static void init(void) {
     sg_buffer_desc terrain_vertices{};
     terrain_vertices.data = {state.terrain.mesh.vertices, state.terrain.mesh.vertex_count*sizeof(yard_mesh_vertex)};
     terrain_vertices.label = "static voxel terrain vertices";
-    state.bindings.vertex_buffers[0] = sg_make_buffer(terrain_vertices);
+    state.terrain_bindings.vertex_buffers[0] = sg_make_buffer(terrain_vertices);
     sg_buffer_desc terrain_indices{};
     terrain_indices.usage.index_buffer = true;
     terrain_indices.data = {state.terrain.mesh.indices, state.terrain.mesh.index_count*sizeof(uint32_t)};
     terrain_indices.label = "static voxel terrain indices";
-    state.bindings.index_buffer = sg_make_buffer(terrain_indices);
-    if (sg_query_buffer_state(state.bindings.vertex_buffers[0]) != SG_RESOURCESTATE_VALID ||
-        sg_query_buffer_state(state.bindings.index_buffer) != SG_RESOURCESTATE_VALID) {
+    state.terrain_bindings.index_buffer = sg_make_buffer(terrain_indices);
+    if (sg_query_buffer_state(state.terrain_bindings.vertex_buffers[0]) != SG_RESOURCESTATE_VALID ||
+        sg_query_buffer_state(state.terrain_bindings.index_buffer) != SG_RESOURCESTATE_VALID) {
         fprintf(stderr, "Cannot upload terrain mesh.\n");
         exit(EXIT_FAILURE);
     }
@@ -507,11 +507,11 @@ static void init(void) {
     catch(const std::exception& e) { fprintf(stderr,"Scene generation failed: %s\n",e.what());exit(EXIT_FAILURE); }
     make_grass_volume();
     yard_mesh_destroy(&state.terrain.mesh);
-    sg_shader shader = sg_make_shader(cube_shader_desc(sg_query_backend()));
+    sg_shader shader = sg_make_shader(terrain_shader_desc(sg_query_backend()));
     sg_pipeline_desc terrain_pipeline{};
     terrain_pipeline.shader = shader;
-    terrain_pipeline.layout.attrs[ATTR_cube_position].format = SG_VERTEXFORMAT_FLOAT3;
-    terrain_pipeline.layout.attrs[ATTR_cube_normal].format = SG_VERTEXFORMAT_FLOAT3;
+    terrain_pipeline.layout.attrs[ATTR_terrain_position].format = SG_VERTEXFORMAT_FLOAT3;
+    terrain_pipeline.layout.attrs[ATTR_terrain_normal].format = SG_VERTEXFORMAT_FLOAT3;
     terrain_pipeline.index_type = SG_INDEXTYPE_UINT32;
     terrain_pipeline.cull_mode = SG_CULLMODE_BACK;
     terrain_pipeline.face_winding = SG_FACEWINDING_CCW;
@@ -521,7 +521,7 @@ static void init(void) {
     terrain_pipeline.colors[0].pixel_format = SG_PIXELFORMAT_RGBA16F;
     terrain_pipeline.sample_count = state.msaa;
     terrain_pipeline.label = "voxel terrain pipeline";
-    state.pipeline = sg_make_pipeline(terrain_pipeline);
+    state.terrain_pipeline = sg_make_pipeline(terrain_pipeline);
     try { make_shadows(); }
     catch(const std::exception& e) {fprintf(stderr,"Shadow initialization failed: %s\n",e.what());exit(EXIT_FAILURE);}
 }
@@ -619,8 +619,8 @@ static void frame(void) {
         sg_apply_bindings(&state.sky_bindings);
         sg_apply_uniforms(UB_sky_params, SG_RANGE(sky));
         sg_draw(0, 3, 1);
-        sg_apply_pipeline(state.pipeline);
-        sg_apply_bindings(&state.bindings);
+        sg_apply_pipeline(state.terrain_pipeline);
+        sg_apply_bindings(&state.terrain_bindings);
         sg_apply_uniforms(UB_vs_params, SG_RANGE(uniforms));
         sg_apply_uniforms(UB_light_params, SG_RANGE(light));
         sg_apply_uniforms(UB_shadow_params,SG_RANGE(shadow));

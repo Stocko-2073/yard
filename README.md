@@ -146,8 +146,8 @@ See [data/README.md](data/README.md) for the atlas and profile format.
 
 `src/main.cpp` owns the app, rendering and input; the other files in `src/` are
 the astronomy, camera, skyglow, terrain, marching-cubes, culling, geometry and
-tree modules. Shaders live in `shaders/cube.glsl`, which `sokol-shdc` compiles to
-`build/generated/cube.glsl.h` (generated, never edited or committed) for Metal,
+tree modules. Shaders live in `shaders/yard.glsl`, which `sokol-shdc` compiles to
+`build/generated/yard.glsl.h` (generated, never edited or committed) for Metal,
 HLSL5, GLSL430, GLSL300ES and WGSL. Only the macOS/Metal app build exists.
 
 Vendored dependencies are pinned, with their licenses and revisions alongside:

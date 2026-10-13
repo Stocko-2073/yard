@@ -180,7 +180,7 @@ layout(binding=0) uniform vs_params {
 };
 @end
 
-@vs vs
+@vs terrain_vs
 @glsl_options fixup_clipspace
 @include_block scene_view
 @include_block camera
@@ -209,7 +209,7 @@ layout(binding=1) uniform light_params {
 };
 @end
 
-@fs fs
+@fs terrain_fs
 @include_block scene_light
 @include_block lighting
 @include_block shadows
@@ -355,7 +355,7 @@ void main() {
 }
 @end
 
-@program cube vs fs
+@program terrain terrain_vs terrain_fs
 @program sky sky_vs sky_fs
 
 @vs preview_vs
